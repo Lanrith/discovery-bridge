@@ -9,9 +9,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/state"
 	"github.com/lanrith/discovery-bridge/tests/fixtures"
+	"github.com/miekg/dns"
 )
 
 func TestAliasAndSQLiteFixtures(t *testing.T) {

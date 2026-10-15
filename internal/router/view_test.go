@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/config"
 	"github.com/lanrith/discovery-bridge/internal/observation"
 	"github.com/lanrith/discovery-bridge/internal/policy"
 	"github.com/lanrith/discovery-bridge/internal/services"
 	"github.com/lanrith/discovery-bridge/internal/state"
+	"github.com/miekg/dns"
 )
 
 func deviceRecords(t *testing.T, now time.Time) []catalog.Record {

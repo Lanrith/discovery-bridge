@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/gateway"
 	"github.com/lanrith/discovery-bridge/internal/policy"
 	"github.com/lanrith/discovery-bridge/internal/responder"
 	"github.com/lanrith/discovery-bridge/internal/state"
+	"github.com/miekg/dns"
 )
 
 func TestReadyMappingSurvivesFeedAndDNSSDThenWithdraws(t *testing.T) {

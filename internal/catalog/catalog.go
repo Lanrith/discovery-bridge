@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/jsonwire"
 	"github.com/lanrith/discovery-bridge/internal/policy"
+	"github.com/miekg/dns"
 	"golang.org/x/sys/unix"
 )
 

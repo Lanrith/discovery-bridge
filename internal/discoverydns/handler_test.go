@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/config"
 	"github.com/lanrith/discovery-bridge/internal/native"
+	"github.com/miekg/dns"
 )
 
 type queryFunc func(context.Context, native.Question) (native.Result, error)

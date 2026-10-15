@@ -4,8 +4,8 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/policy"
+	"github.com/miekg/dns"
 )
 
 func TestWholePacketAdmissionAndNativeAddressPolicy(t *testing.T) {

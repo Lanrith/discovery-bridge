@@ -5,9 +5,9 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/dnswire"
+	"github.com/miekg/dns"
 )
 
 // Question is the only pod information exported to the LAN lookup boundary.

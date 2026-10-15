@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/avahi"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/config"
@@ -27,6 +26,7 @@ import (
 	"github.com/lanrith/discovery-bridge/internal/services"
 	"github.com/lanrith/discovery-bridge/internal/state"
 	"github.com/lanrith/discovery-bridge/internal/translation"
+	"github.com/miekg/dns"
 )
 
 type demand struct {

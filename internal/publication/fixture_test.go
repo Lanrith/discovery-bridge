@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/avahi"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/state"
 	"github.com/lanrith/discovery-bridge/tests/fixtures"
+	"github.com/miekg/dns"
 )
 
 func TestPublicationFrameFixtureAndSQLiteOwnership(t *testing.T) {

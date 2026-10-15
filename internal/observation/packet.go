@@ -6,10 +6,10 @@ import (
 	"net/netip"
 	"slices"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/dnswire"
 	"github.com/lanrith/discovery-bridge/internal/policy"
+	"github.com/miekg/dns"
 )
 
 // Link identifies an admitted interface generation and its active IP families.

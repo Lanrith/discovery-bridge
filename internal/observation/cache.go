@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
+	"github.com/miekg/dns"
 )
 
 // Record retains the LAN link generation and transport family of an observation.

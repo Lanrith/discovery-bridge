@@ -12,12 +12,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/gateway"
 	"github.com/lanrith/discovery-bridge/internal/jsonwire"
 	"github.com/lanrith/discovery-bridge/internal/linuxnet"
 	"github.com/lanrith/discovery-bridge/internal/responder"
+	"github.com/miekg/dns"
 )
 
 type datagram struct {

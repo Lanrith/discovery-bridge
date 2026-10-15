@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
+	"github.com/miekg/dns"
 )
 
 // Reply contains positive or goodbye answers, never a LAN question.

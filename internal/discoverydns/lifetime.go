@@ -1,8 +1,8 @@
 package discoverydns
 
 import (
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
+	"github.com/miekg/dns"
 )
 
 // dependencyTTLs bounds aliases, service targets and browse pointers by the

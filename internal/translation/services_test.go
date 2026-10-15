@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/config"
 	"github.com/lanrith/discovery-bridge/internal/gateway"
 	"github.com/lanrith/discovery-bridge/internal/policy"
 	"github.com/lanrith/discovery-bridge/internal/services"
+	"github.com/miekg/dns"
 )
 
 func TestServiceVIPUsesOnlyExistingMappingAndIndependentExpiry(t *testing.T) {

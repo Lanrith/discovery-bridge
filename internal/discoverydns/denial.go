@@ -3,9 +3,9 @@ package discoverydns
 import (
 	"encoding/base32"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/dnswire"
+	"github.com/miekg/dns"
 )
 
 // successor returns the next legal DNS name in canonical order. Most names

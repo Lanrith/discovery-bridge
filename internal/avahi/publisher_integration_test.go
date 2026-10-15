@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/observation"
+	"github.com/miekg/dns"
 )
 
 type publicationFixture struct {

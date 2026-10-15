@@ -9,10 +9,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/dnswire"
 	"github.com/lanrith/discovery-bridge/internal/native"
+	"github.com/miekg/dns"
 )
 
 // Handler implements authoritative answers only; it never follows public DNS.

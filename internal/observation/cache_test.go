@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
+	"github.com/miekg/dns"
 )
 
 func observed(t *testing.T, address string, family int, ttl uint32) Record {

@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/dnswire"
 	"github.com/lanrith/discovery-bridge/internal/observation"
+	"github.com/miekg/dns"
 )
 
 // ErrBusy means the bounded native query budget has been exhausted.

@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/jsonwire"
 	"github.com/lanrith/discovery-bridge/internal/responder"
+	"github.com/miekg/dns"
 )
 
 // ErrBusy signals bounded lookup admission rather than a negative DNS answer.

@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/observation"
+	"github.com/miekg/dns"
 )
 
 func TestPublicationCacheLifetimeStaysInsideLongEvidenceLease(t *testing.T) {

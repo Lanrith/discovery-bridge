@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/config"
 	"github.com/lanrith/discovery-bridge/internal/jsonwire"
 	"github.com/lanrith/discovery-bridge/internal/policy"
 	"github.com/lanrith/discovery-bridge/internal/registry"
+	"github.com/miekg/dns"
 )
 
 const Lease = 15 * time.Second

@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/avahi"
 	"github.com/lanrith/discovery-bridge/internal/native"
+	"github.com/miekg/dns"
 )
 
 // Query exposes only the active epoch's read-only native query interface.

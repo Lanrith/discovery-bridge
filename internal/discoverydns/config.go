@@ -9,11 +9,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/config"
 	"github.com/lanrith/discovery-bridge/internal/dnswire"
 	"github.com/lanrith/discovery-bridge/internal/jsonwire"
+	"github.com/miekg/dns"
 )
 
 // Link maps one LAN source to service/host domains and reverse delegations.

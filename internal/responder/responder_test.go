@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
+	"github.com/miekg/dns"
 )
 
 func hostView(t *testing.T) []catalog.Answer {

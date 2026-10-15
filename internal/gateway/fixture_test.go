@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/responder"
+	"github.com/miekg/dns"
 )
 
 func TestClientPreservesCompleteDNSSDChainAndOpaqueTXT(t *testing.T) {

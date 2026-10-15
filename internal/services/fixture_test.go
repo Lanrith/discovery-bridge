@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/policy"
 	"github.com/lanrith/discovery-bridge/tests/fixtures"
+	"github.com/miekg/dns"
 )
 
 func TestServiceProducerAndReceiverWireFixture(t *testing.T) {

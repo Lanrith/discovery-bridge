@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/native"
+	"github.com/miekg/dns"
 )
 
 func (h *Handler) admitted(address net.Addr) bool {

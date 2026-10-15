@@ -10,9 +10,9 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/observation"
+	"github.com/miekg/dns"
 )
 
 func fixtureResolver(t *testing.T, start Start) *Resolver {

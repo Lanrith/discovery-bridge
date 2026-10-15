@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/config"
 	"github.com/lanrith/discovery-bridge/internal/policy"
 	"github.com/lanrith/discovery-bridge/internal/responder"
+	"github.com/miekg/dns"
 )
 
 func testPolicy(t *testing.T) *policy.SourcePolicy {

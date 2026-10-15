@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/linuxnet"
+	"github.com/miekg/dns"
 	"golang.org/x/sys/unix"
 )
 

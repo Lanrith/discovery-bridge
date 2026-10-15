@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/avahi"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/observation"
 	"github.com/lanrith/discovery-bridge/internal/publication"
 	"github.com/lanrith/discovery-bridge/internal/state"
+	"github.com/miekg/dns"
 )
 
 var errLANBudget = errors.New("LAN alias publication budget exceeded")

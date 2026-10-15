@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/state"
+	"github.com/miekg/dns"
 )
 
 func openIdentities(t *testing.T) *state.Identities {

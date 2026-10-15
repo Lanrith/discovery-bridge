@@ -18,7 +18,7 @@ import (
 	"strings"
 )
 
-const repository = "https://github.com/lanrith/discovery-bridge"
+const repository = "https://github.com/Lanrith/discovery-bridge"
 const imageName = "ghcr.io/lanrith/discovery-bridge"
 
 var versionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$`)

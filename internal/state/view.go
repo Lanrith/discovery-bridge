@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
+	"github.com/miekg/dns"
 )
 
 // OwnsHost distinguishes an observed original hostname from reserved aliases.

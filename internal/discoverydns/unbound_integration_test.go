@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/config"
 	"github.com/lanrith/discovery-bridge/internal/dnswire"
 	"github.com/lanrith/discovery-bridge/internal/native"
+	"github.com/miekg/dns"
 )
 
 func freePort(t *testing.T) int {

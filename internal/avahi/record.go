@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/dnswire"
 	"github.com/lanrith/discovery-bridge/internal/observation"
+	"github.com/miekg/dns"
 )
 
 func localName(name string) (string, error) {

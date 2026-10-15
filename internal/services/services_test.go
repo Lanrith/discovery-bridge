@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/config"
 	"github.com/lanrith/discovery-bridge/internal/policy"
+	"github.com/miekg/dns"
 )
 
 const serviceJSON = `{"apiVersion":"v1","kind":"Service","metadata":{"namespace":"services","name":"example","uid":"service-uid","resourceVersion":"10"},"spec":{"type":"LoadBalancer","ports":[{"name":"http","protocol":"TCP","port":80,"targetPort":3000}],"clusterIP":"2001:db8:e000::10"},"status":{"loadBalancer":{"ingress":[{"ip":"2001:db8:ff00::22","ipMode":"VIP"}]}}}`

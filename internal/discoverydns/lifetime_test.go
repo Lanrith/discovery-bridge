@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/dnswire"
 	"github.com/lanrith/discovery-bridge/internal/native"
+	"github.com/miekg/dns"
 )
 
 func TestDependentRecordsDoNotOutliveAddress(t *testing.T) {

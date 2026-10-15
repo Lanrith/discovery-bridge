@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/policy"
 	"github.com/lanrith/discovery-bridge/tests/fixtures"
+	"github.com/miekg/dns"
 )
 
 type expectedAnswer struct {

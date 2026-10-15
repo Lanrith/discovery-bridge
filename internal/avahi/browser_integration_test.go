@@ -19,10 +19,10 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
-	"github.com/miekg/dns"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
 	"github.com/lanrith/discovery-bridge/internal/observation"
 	"github.com/lanrith/discovery-bridge/internal/policy"
+	"github.com/miekg/dns"
 )
 
 func privateBus(t *testing.T) string {
