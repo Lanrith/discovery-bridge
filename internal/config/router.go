@@ -1,0 +1,191 @@
+package config
+
+import (
+	"errors"
+	"net/netip"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+
+	"github.com/lanrith/discovery-bridge/internal/catalog"
+	"github.com/lanrith/discovery-bridge/internal/jsonwire"
+	"github.com/lanrith/discovery-bridge/internal/policy"
+)
+
+// LAN ties a configurable interface to one source identity and explicit families.
+type LAN struct {
+	Interface string `json:"interface"`
+	Source    string `json:"source"`
+	Families  []int  `json:"families"`
+}
+
+// Listener is a numeric unicast HTTP bind with independently admitted client ranges.
+type Listener struct {
+	Endpoint
+	Clients []string `json:"clients"`
+}
+
+// Prefixes validates the listener and returns copies of bounded client prefixes.
+func (l Listener) Prefixes() ([]netip.Prefix, error) {
+	if err := l.Validate(); err != nil {
+		return nil, err
+	}
+	if len(l.Clients) < 1 || len(l.Clients) > 32 {
+		return nil, errors.New("explicit bounded gateway client ranges required")
+	}
+	var result []netip.Prefix
+	for _, value := range l.Clients {
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil || prefix != prefix.Masked() || prefix.Bits() == 0 || prefix.Addr().IsMulticast() || prefix.Addr().Is4In6() {
+			return nil, errors.New("invalid gateway client range")
+		}
+		result = append(result, prefix)
+	}
+	return result, nil
+}
+
+// Bootstrap supplies generic browse demand in addition to standard enumeration.
+type Bootstrap struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// NativeListener admits one independent DNS frontend account to selected links.
+type NativeListener struct {
+	Socket  string   `json:"socket"`
+	User    string   `json:"user"`
+	Sources []string `json:"sources"`
+}
+
+// Router contains operator-owned topology, paths and local producer authority.
+// Translator readiness and Service publication have separate explicit settings.
+type Router struct {
+	Enabled         bool                 `json:"enabled"`
+	Interfaces      []LAN                `json:"interfaces"`
+	Sources         map[string][]string  `json:"sources"`
+	Forbidden       []string             `json:"forbidden"`
+	AliasPrefix     string               `json:"alias_prefix"`
+	BusSocket       string               `json:"bus_socket"`
+	State           string               `json:"state"`
+	PublisherSocket string               `json:"publisher_socket"`
+	ProducerUser    string               `json:"producer_user"`
+	Gateway         *Listener            `json:"gateway,omitempty"`
+	Bootstrap       []Bootstrap          `json:"bootstrap,omitempty"`
+	Translators     *Translators         `json:"translators,omitempty"`
+	Publication     *PublicationListener `json:"publication,omitempty"`
+	Native          *NativeListener      `json:"native,omitempty"`
+}
+
+var (
+	aliasPrefix = regexp.MustCompile(`^[a-z][a-z0-9-]{0,7}$`)
+	sourceName  = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
+	account     = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+)
+
+// Policy validates the explicit native source and excluded network policy.
+func (r Router) Policy() (*policy.SourcePolicy, error) {
+	forbidden := slices.Clone(r.Forbidden)
+	if r.Translators != nil {
+		if err := r.Translators.Validate(); err != nil {
+			return nil, err
+		}
+		forbidden = append(forbidden, r.Translators.NAT64Prefix, r.Translators.NAT46Pool)
+		if r.Translators.NAT46 != nil {
+			forbidden = append(forbidden, r.Translators.NAT46.Prefix)
+		}
+		if r.Translators.NAT64 != nil {
+			forbidden = append(forbidden, r.Translators.NAT64.DynamicPool)
+		}
+	}
+	return policy.New(r.Sources, forbidden)
+}
+
+// Validate rejects implicit topology, paths, publication authority or listeners.
+func (r Router) Validate() error {
+	if !r.Enabled || len(r.Interfaces) == 0 || len(r.Interfaces) > 12 || !aliasPrefix.MatchString(r.AliasPrefix) || !filepath.IsAbs(r.State) || !account.MatchString(r.ProducerUser) || len(r.Bootstrap) > 64 {
+		return errors.New("explicit enabled router configuration required")
+	}
+	for _, path := range []string{r.BusSocket, r.PublisherSocket} {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path || len(path) > 107 {
+			return errors.New("absolute local Unix socket path required")
+		}
+	}
+	if filepath.Clean(r.State) != r.State || r.BusSocket == r.PublisherSocket || r.State == r.BusSocket || r.State == r.PublisherSocket {
+		return errors.New("distinct normalized router state and socket paths required")
+	}
+	interfaces, sources := make(map[string]bool), make(map[string]bool)
+	groups := 0
+	for _, lan := range r.Interfaces {
+		if len(lan.Interface) == 0 || len(lan.Interface) > 15 || strings.ContainsAny(lan.Interface, "/\x00\n ") || !sourceName.MatchString(lan.Source) || interfaces[lan.Interface] || sources[lan.Source] || len(r.Sources[lan.Source]) == 0 || len(lan.Families) == 0 || len(lan.Families) > 2 || slices.ContainsFunc(lan.Families, func(family int) bool { return family != 4 && family != 6 }) || len(lan.Families) == 2 && lan.Families[0] == lan.Families[1] {
+			return errors.New("distinct admitted LAN interfaces, sources and IP families required")
+		}
+		groups += len(lan.Families)
+		interfaces[lan.Interface], sources[lan.Source] = true, true
+	}
+	if groups > 12 {
+		return errors.New("router publication group budget exceeded")
+	}
+	if err := r.validatePublication(sources); err != nil {
+		return err
+	}
+	if r.Translators != nil {
+		if err := r.Translators.Validate(); err != nil {
+			return err
+		}
+		for _, profile := range []*Translator{r.Translators.NAT46, r.Translators.NAT64} {
+			if profile != nil && interfaces[profile.Interface] {
+				return errors.New("translator TUN cannot be a discovery LAN")
+			}
+		}
+	}
+	for source := range r.Sources {
+		if !sourceName.MatchString(source) {
+			return errors.New("invalid source identity")
+		}
+	}
+	for _, question := range r.Bootstrap {
+		if !catalog.LocalName(question.Name) || question.Type != "A" && question.Type != "AAAA" && question.Type != "PTR" && question.Type != "SRV" && question.Type != "TXT" {
+			return errors.New("bootstrap requires supported .local questions")
+		}
+	}
+	if r.Gateway != nil {
+		if _, err := r.Gateway.Prefixes(); err != nil {
+			return err
+		}
+	}
+	if r.Native != nil {
+		n := r.Native
+		if !filepath.IsAbs(n.Socket) || filepath.Clean(n.Socket) != n.Socket || len(n.Socket) > 107 {
+			return errors.New("absolute native socket path required")
+		}
+		if n.Socket == r.BusSocket || n.Socket == r.PublisherSocket || n.Socket == r.State || !account.MatchString(n.User) || n.User == "root" || n.User == r.ProducerUser {
+			return errors.New("distinct read-only native endpoint and account required")
+		}
+		if len(n.Sources) == 0 || len(n.Sources) > len(sources) {
+			return errors.New("explicit native sources required")
+		}
+		seen := make(map[string]bool)
+		for _, source := range n.Sources {
+			if !sources[source] || seen[source] {
+				return errors.New("native source must select a distinct admitted link")
+			}
+			seen[source] = true
+		}
+	}
+	_, err := r.Policy()
+	return err
+}
+
+// LoadRouter reads one bounded, strictly decoded operator configuration.
+func LoadRouter(path string) (Router, error) {
+	var r Router
+	data, err := read(path)
+	if err != nil {
+		return r, err
+	}
+	if err := jsonwire.Decode(data, MaxBytes, &r); err != nil {
+		return r, err
+	}
+	return r, r.Validate()
+}

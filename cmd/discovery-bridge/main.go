@@ -1,0 +1,186 @@
+// Discovery Bridge supplies Linux mDNS discovery adapters and diagnostic tools.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"runtime"
+	"syscall"
+
+	"github.com/lanrith/discovery-bridge/internal/config"
+	"github.com/lanrith/discovery-bridge/internal/discoverydns"
+	"github.com/lanrith/discovery-bridge/internal/node"
+	"github.com/lanrith/discovery-bridge/internal/registry"
+	"github.com/lanrith/discovery-bridge/internal/router"
+	"github.com/lanrith/discovery-bridge/internal/services"
+	registrydata "github.com/lanrith/discovery-bridge/registry"
+)
+
+var version = "development"
+
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "dns-proxy" {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer cancel()
+		return runDNS(ctx, args[1:], stderr)
+	}
+	if len(args) > 0 && args[0] == "kubernetes-publisher" {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer cancel()
+		return runServices(ctx, args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && (args[0] == "collector" || args[0] == "publisher") {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer cancel()
+		return runRouter(ctx, args, stdout, stderr)
+	}
+	if len(args) > 0 && (args[0] == "broker" || args[0] == "worker") {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer cancel()
+		return runNode(ctx, args, stderr)
+	}
+	if len(args) == 1 && args[0] == "version" {
+		if _, err := fmt.Fprintf(stdout, "discovery-bridge %s (%s)\n", version, runtime.Version()); err != nil {
+			return 1
+		}
+		return 0
+	}
+	if len(args) < 2 || args[0] != "registry" || args[1] != "describe" {
+		if _, err := fmt.Fprintln(stderr, "usage: discovery-bridge version | registry describe [--locale language] _service._tcp | broker --config path [--node name] | collector --config path | publisher --config path | kubernetes-publisher --config path | dns-proxy --config path"); err != nil {
+			return 1
+		}
+		return 2
+	}
+	flags := flag.NewFlagSet("registry describe", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	locale := flags.String("locale", "", "Avahi description language")
+	if err := flags.Parse(args[2:]); err != nil {
+		return 2
+	}
+	if flags.NArg() != 1 {
+		return 2
+	}
+	r, err := registry.Load(registrydata.Files)
+	if err != nil {
+		if _, writeErr := fmt.Fprintln(stderr, err); writeErr != nil {
+			return 1
+		}
+		return 1
+	}
+	description, err := r.Describe(flags.Arg(0), *locale)
+	if err != nil {
+		if _, writeErr := fmt.Fprintln(stderr, err); writeErr != nil {
+			return 1
+		}
+		return 2
+	}
+	if err := json.NewEncoder(stdout).Encode(map[string]string{"type": flags.Arg(0), "description": description, "registry_digest": r.Digest()}); err != nil {
+		return 1
+	}
+	return 0
+}
+
+func runDNS(ctx context.Context, args []string, stderr io.Writer) int {
+	flags := flag.NewFlagSet("dns-proxy", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	path := flags.String("config", "", "absolute authoritative DNS configuration path")
+	check := flags.Bool("check", false, "validate configuration without opening listeners")
+	if flags.Parse(args) != nil || flags.NArg() != 0 || *path == "" {
+		return 2
+	}
+	settings, err := discoverydns.Load(*path)
+	if err == nil && !*check {
+		err = discoverydns.Run(ctx, settings)
+	}
+	if err == nil || errors.Is(err, context.Canceled) {
+		return 0
+	}
+	if _, writeErr := fmt.Fprintln(stderr, "discovery dns stopped:", err); writeErr != nil {
+		return 1
+	}
+	return 1
+}
+
+func runServices(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("kubernetes-publisher", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	path := flags.String("config", "", "absolute Service publisher configuration path")
+	if flags.Parse(args) != nil || flags.NArg() != 0 || *path == "" {
+		return 2
+	}
+	settings, err := config.LoadServicePublisher(*path)
+	if err == nil {
+		err = services.RunPublisher(ctx, settings, stdout)
+	}
+	if err == nil || errors.Is(err, context.Canceled) {
+		return 0
+	}
+	if _, err := fmt.Fprintln(stderr, "Service publisher stopped:", err); err != nil {
+		return 1
+	}
+	return 1
+}
+
+func runRouter(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	path := flags.String("config", "", "absolute router configuration path")
+	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || *path == "" {
+		return 2
+	}
+	settings, err := config.LoadRouter(*path)
+	if err == nil {
+		if args[0] == "collector" {
+			err = router.RunCollector(ctx, settings, stdout)
+		} else {
+			err = router.RunPublisher(ctx, settings)
+		}
+	}
+	if err == nil || errors.Is(err, context.Canceled) {
+		return 0
+	}
+	if _, err := fmt.Fprintln(stderr, "router discovery stopped:", err); err != nil {
+		return 1
+	}
+	return 1
+}
+
+func runNode(ctx context.Context, args []string, stderr io.Writer) int {
+	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	var err error
+	if args[0] == "broker" {
+		path := flags.String("config", "", "absolute node configuration path")
+		name := flags.String("node", "", "downward API node name")
+		if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || *path == "" {
+			return 2
+		}
+		var settings config.Node
+		settings, err = config.LoadNode(*path, *name)
+		if err == nil {
+			err = node.RunBroker(ctx, settings, stderr)
+		}
+	} else {
+		fd := flags.Int("control-fd", -1, "inherited broker descriptor")
+		parent := flags.Int("parent", -1, "broker parent PID")
+		if flags.Parse(args[1:]) != nil || flags.NArg() != 0 {
+			return 2
+		}
+		err = node.RunWorker(ctx, *fd, *parent)
+	}
+	if err == nil || errors.Is(err, context.Canceled) {
+		return 0
+	}
+	if _, writeErr := fmt.Fprintln(stderr, "discovery stopped:", err); writeErr != nil {
+		return 1
+	}
+	return 1
+}
+
+func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }

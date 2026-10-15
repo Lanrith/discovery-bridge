@@ -1,0 +1,32 @@
+[Unit]
+Description=Discovery Bridge LAN collector and pod catalog
+After=discovery-bridge-publisher.service
+Wants=discovery-bridge-publisher.service
+ConditionPathExists=/etc/discovery-bridge/router.json
+
+[Service]
+Type=notify
+User=discovery-bridge-collector
+Group=discovery-bridge
+UMask=0007
+Environment=GOMAXPROCS=2
+ExecStart=/usr/bin/discovery-bridge collector --config /etc/discovery-bridge/router.json
+WatchdogSec=10s
+WatchdogSignal=SIGKILL
+TimeoutStartSec=100s
+TimeoutStopSec=2s
+Restart=on-failure
+RestartSec=1s
+NoNewPrivileges=yes
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+ProtectSystem=strict
+ReadWritePaths=/var/lib/discovery-bridge /run/discovery-bridge-native
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+MemoryMax=128M
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

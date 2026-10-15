@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        default: 0.0.0-ci
+      save_artifacts:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_VERSION: ${{ inputs.version || '0.0.0-ci' }}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Native tests (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.2'
+          check-latest: false
+      - name: Verify public source and module inputs
+        run: |
+          go run ./cmd/release-tools check-source
+          go mod verify
+          test -z "$(gofmt -l cmd internal registry)"
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+      - name: Go tests and static checks
+        run: |
+          go vet ./...
+          go test -race -shuffle=on -count=1 ./...
+          go test -race -tags integration -count=1 ./internal/native ./internal/discoverydns
+          make artifacts VERSION="$RELEASE_VERSION" ARCH=${{ matrix.arch }}
+          dist/native/${{ matrix.arch }}/discovery-bridge version
+          go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 -mode=binary dist/native/${{ matrix.arch }}/discovery-bridge
+      - name: Isolated namespace integration
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --yes iproute2 util-linux dbus avahi-daemon ethtool unbound
+          # Ubuntu confines /usr/sbin/unbound to its service configuration
+          # paths. Use the same distro binary at a fixture-only path for the
+          # unprivileged loopback test; leave the service's AppArmor policy on.
+          install -m 0755 "$(command -v unbound)" "$RUNNER_TEMP/unbound-fixture"
+          UNBOUND_TEST_BINARY="$RUNNER_TEMP/unbound-fixture" go test -race -tags integration -count=1 ./internal/discoverydns -run TestRealUnbound
+          sudo env "PATH=$PATH" "GOMODCACHE=$(go env GOMODCACHE)" "GOCACHE=$(go env GOCACHE)" go test -race -tags integration -count=1 ./internal/linuxnet ./internal/node ./internal/avahi ./internal/observation ./internal/router ./internal/translation
+      - name: Restricted container integration
+        run: |
+          docker build --tag discovery-bridge-integration --file tests/Containerfile.integration tests
+          docker run --rm --network none --memory 192m --pids-limit 64 \
+            --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --cap-add FSETID --cap-add DAC_OVERRIDE \
+            --cap-add SETUID --cap-add SETGID --security-opt no-new-privileges \
+            --volume "$GITHUB_WORKSPACE:/source:ro" --workdir /source \
+            discovery-bridge-integration dist/release-tools check-install --root /source \
+            --artifact dist/releases/${{ matrix.arch }}/discovery-bridge_${RELEASE_VERSION}_${{ matrix.arch }}.deb
+          docker build --tag discovery-bridge-package --file tests/Containerfile.package \
+            --build-arg PACKAGE=discovery-bridge_${RELEASE_VERSION}_${{ matrix.arch }}.deb \
+            dist/releases/${{ matrix.arch }}
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,exec --memory 192m --pids-limit 64 \
+            --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --cap-add FSETID --cap-add DAC_OVERRIDE \
+            --security-opt no-new-privileges \
+            --env DISCOVERY_BRIDGE_TEST_BINARY=/usr/bin/discovery-bridge \
+            --volume "$GITHUB_WORKSPACE:/source:ro" --workdir /source \
+            discovery-bridge-package dist/release-tools check-support --root /source
+          for package in linuxnet node avahi observation publication router translation; do
+            CGO_ENABLED=0 go test -c -tags integration -o "$RUNNER_TEMP/$package.test" "./internal/$package"
+            capabilities=()
+            if [ "$package" = translation ]; then capabilities+=(--device /dev/net/tun); fi
+            if [ "$package" = observation ] || [ "$package" = router ]; then capabilities+=(--cap-add NET_RAW); fi
+            if [ "$package" = router ]; then
+              # Fixture-only permissions for Avahi's runtime directory and
+              # signalling separate test accounts; roles keep only NET_RAW.
+              capabilities+=(--cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add KILL)
+              capabilities+=(--env DISCOVERY_BRIDGE_TEST_DBUS_POLICY=/lab/dbus-policy.conf)
+              capabilities+=(--volume "$GITHUB_WORKSPACE/packaging/dbus/org.discovery-bridge.conf:/lab/dbus-policy.conf:ro")
+            fi
+            # NET_ADMIN is used by the test harness to create isolated interfaces.
+            # Worker permissions remain empty; the broker needs no CAP_KILL.
+            docker run --rm --network none --read-only \
+              --tmpfs /tmp:rw,nosuid,nodev,exec --tmpfs /run \
+              --memory 192m --pids-limit 64 --cap-drop ALL \
+              --cap-add SYS_ADMIN --cap-add SYS_PTRACE --cap-add SETUID \
+              --cap-add SETGID --cap-add NET_ADMIN \
+              "${capabilities[@]}" \
+              --security-opt apparmor=unconfined --security-opt no-new-privileges \
+              --env DISCOVERY_BRIDGE_TEST_BINARY=/usr/bin/discovery-bridge \
+              --volume "$RUNNER_TEMP/$package.test:/lab/test:ro" \
+              --entrypoint /lab/test discovery-bridge-package -test.v
+          done
+      - name: Installed systemd unit qualification
+        run: |
+          trap 'docker rm -f bridge-systemd >/dev/null 2>&1' EXIT
+          docker run --detach --name bridge-systemd --hostname bridge-fixture \
+            --network none --privileged --cgroupns private --memory 256m --pids-limit 128 \
+            --volume "$GITHUB_WORKSPACE:/source:ro" \
+            discovery-bridge-package /lib/systemd/systemd --unit=multi-user.target --log-target=console
+          for attempt in $(seq 1 50); do
+            if docker exec bridge-systemd systemctl show --property Version --value >/dev/null 2>&1; then break; fi
+            sleep 0.1
+          done
+          docker exec bridge-systemd /source/dist/release-tools check-systemd --root /source
+      - name: Qualified offline OCI image and both container roles
+        run: |
+          sudo apt-get install --yes podman
+          dist/release-tools container-prepare --arch ${{ matrix.arch }}
+          sudo dist/release-tools container-build --arch ${{ matrix.arch }}
+          sudo dist/release-tools check-container --arch ${{ matrix.arch }}
+          for package in node services; do
+            CGO_ENABLED=0 go test -c -tags integration -o "$RUNNER_TEMP/container-$package.test" "./internal/$package"
+            capabilities=()
+            if [ "$package" = node ]; then
+              capabilities+=(--user 0 --cap-add SYS_ADMIN --cap-add SYS_PTRACE)
+              capabilities+=(--cap-add SETUID --cap-add SETGID --cap-add NET_ADMIN)
+              capabilities+=(--security-opt apparmor=unconfined --tmpfs /run)
+            fi
+            # Match containerd's runc. Ubuntu's crun stacks an AppArmor profile
+            # whose signal rules deny even same-UID child signals with NNP.
+            sudo podman run --runtime=runc --rm --network none --read-only \
+              --tmpfs /tmp:rw,nosuid,nodev,exec --memory 192m --pids-limit 64 \
+              --cap-drop ALL --security-opt no-new-privileges "${capabilities[@]}" \
+              --env DISCOVERY_BRIDGE_TEST_BINARY=/usr/bin/discovery-bridge \
+              --volume "$RUNNER_TEMP/container-$package.test:/lab/test:ro" \
+              --entrypoint /lab/test localhost/discovery-bridge-qualified:${{ matrix.arch }} -test.timeout=90s -test.v
+          done
+      - name: Retain qualified platform artifacts
+        if: ${{ inputs.save_artifacts }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qualified-${{ matrix.arch }}
+          path: dist/releases/${{ matrix.arch }}/*
+          if-no-files-found: error
+          retention-days: 7
+
+  lint:
+    name: Lint and vulnerabilities
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.2'
+          check-latest: false
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.14.0
+      - name: Check reachable Go vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+  required:
+    name: Required checks
+    if: always()
+    needs: [test, lint]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every qualification gate
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYRESULT'
+          import json,os
+          results=json.loads(os.environ['RESULTS'])
+          assert results and all(job['result']=='success' for job in results.values())
+          PYRESULT
