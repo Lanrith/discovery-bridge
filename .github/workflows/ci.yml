@@ -43,8 +43,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.2'
+          go-version-file: .go-version
           check-latest: false
+          cache: false
       - name: Verify public source and module inputs
         run: |
           go run ./cmd/release-tools check-source
@@ -59,7 +60,7 @@ jobs:
           go test -race -tags integration -count=1 ./internal/native ./internal/discoverydns
           make artifacts VERSION="$RELEASE_VERSION" ARCH=${{ matrix.arch }}
           dist/native/${{ matrix.arch }}/discovery-bridge version
-          go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 -mode=binary dist/native/${{ matrix.arch }}/discovery-bridge
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -mode=binary dist/native/${{ matrix.arch }}/discovery-bridge
       - name: Isolated namespace integration
         run: |
           sudo apt-get update -qq
@@ -156,7 +157,7 @@ jobs:
           name: qualified-${{ matrix.arch }}
           path: dist/releases/${{ matrix.arch }}/*
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   lint:
     name: Lint and vulnerabilities
@@ -168,13 +169,14 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.2'
+          go-version-file: .go-version
           check-latest: false
+          cache: false
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
       - name: Check reachable Go vulnerabilities
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
   required:
     name: Required checks
