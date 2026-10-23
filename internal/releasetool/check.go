@@ -22,7 +22,7 @@ func (t tool) checkSource() error {
 	if err != nil {
 		return err
 	}
-	allowed := strings.Fields(".github cmd internal registry packaging tests docs .gitignore .dockerignore .go-version .golangci.yml Makefile README.md LICENSE VERSION SECURITY.md CONTRIBUTING.md go.mod go.sum Containerfile")
+	allowed := strings.Fields(".github cmd internal registry packaging tests docs security .gitignore .dockerignore .go-version .golangci.yml Makefile README.md LICENSE VERSION SECURITY.md CONTRIBUTING.md go.mod go.sum Containerfile")
 	bad := strings.Fields("vault inventory inventories build-inputs captures")
 	patterns := []*regexp.Regexp{
 		regexp.MustCompile(`-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----`),

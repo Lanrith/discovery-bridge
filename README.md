@@ -381,7 +381,9 @@ The [compatibility contract](docs/CONTRACT.md) specifies these rules.
 
 ## Build and contribute
 
-Source builds use **Go 1.27.2**, pinned in `go.mod`, `.go-version` and CI:
+Source builds use **Go 1.27.3**, pinned in `.go-version` and CI. `go.mod`
+records the minimum language compatibility version; use the patched compiler
+pin for installable binaries:
 
 ```sh
 make test
@@ -392,7 +394,8 @@ dist/discovery-bridge version
 
 `make test` runs unit tests with the race detector. `make check` runs source
 checks, formatting checks and `go vet`. [Packaging](packaging/README.md) describes
-native artifact and container builds.
+native artifact and container builds. [Security maintenance](docs/security-maintenance.md)
+describes verified updates, independent review and immutable release evidence.
 
 Integration tests require root on disposable Linux hosts with `iproute2`,
 `util-linux`, `dbus`, `avahi-daemon` and `ethtool`. Translator fixtures also need
