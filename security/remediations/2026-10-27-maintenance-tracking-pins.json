@@ -1,0 +1,108 @@
+{
+  "approval": {
+    "reason": "Trusted workflow pins change; this is outside the automatic dependency-update lane.",
+    "status": "fresh-exact-head-independent-human-GitHub-review-required"
+  },
+  "automatic_approvals_enabled": false,
+  "base_commit": "31afb3cd61103d60cabe52520a4210ea3323a67d",
+  "component_predecessor": {
+    "approved_policy_and_repair_chain": [
+      {
+        "audit_url": "https://github.com/Lanrith/discovery-bridge/releases/tag/audit-maintenance-enforcement-20261026T204833Z",
+        "base": "cc26cb5a15505f2c8af832afb2c1d118d1cfe0a6",
+        "head": "5d2fa5a2721c514c3f6622f3c784db72bb9028ab",
+        "human_review_id": 5659724798,
+        "merged_at": "2026-10-26T22:07:52Z",
+        "pull_request": 7,
+        "repository": "Lanrith/discovery-bridge",
+        "source_commit": "31afb3cd61103d60cabe52520a4210ea3323a67d",
+        "tree": "fceffaecea5ff3c08bc93fbfbebdb8a68a3be0bd"
+      }
+    ],
+    "human_review_id": 5659724798,
+    "publication_audit": "https://github.com/Lanrith/discovery-bridge/releases/tag/audit-publication-40410023828-1",
+    "source_commit": "31afb3cd61103d60cabe52520a4210ea3323a67d",
+    "tag": "v0.1.2"
+  },
+  "created_at": "2026-10-27T16:17:43.223752+00:00",
+  "evidence_archive": "https://github.com/Lanrith/discovery-bridge/releases/tag/audit-maintenance-tracking-pins-20261027T161743Z",
+  "input_changes": {
+    ".github/workflows/build-release.yml": {
+      "after_sha256": "b930c559d45342698012707f205e2b2d82cb9bc6cb6e97193f0b15a591d96ca3",
+      "before_sha256": "d99db363dcf2ee5033b9d40260421f82a4be9369b43f840087f446c449d553d1"
+    },
+    ".github/workflows/cleanup-artifacts.yml": {
+      "after_sha256": "b0a7eebfdc3e5de0b149f2c962a572207000af7258f22a9d4725cd90f2ff5463",
+      "before_sha256": "88924654cc63e69d48a3320353eb79c02b94ae5726abb84d42abee3d56e059e3"
+    },
+    ".github/workflows/security-review.yml": {
+      "after_sha256": "4a9b855e482911a90f04def58013d20234638d45ba114485cef85bab913d3ee4",
+      "before_sha256": "96ebbf406f0d52b35659fd255b013e1bb48bd9d7d017ceef270e0202bab2bc39"
+    },
+    ".github/workflows/update-inputs.yml": {
+      "after_sha256": "3e0f694d6651273c41186ebef0a036e48e8bcf588cc3ddec4dbb4b22120370ac",
+      "before_sha256": "f40c8639eb8d4e077b0bc27cbd8e1e2fdbc196a56f672012c03d13dfbbd75565"
+    }
+  },
+  "kind": "verified-maintenance-tracking-source-pin-update",
+  "maintenance_references": [
+    {
+      "after": "5a4bbdb033f16a6d46cbf62c95870164c3bbd8ec",
+      "before": "eaafa126f2aaea4deb1db36dcebc1f511f41820c",
+      "entry": "release-collector",
+      "path": ".github/workflows/build-release.yml"
+    },
+    {
+      "after": "5a4bbdb033f16a6d46cbf62c95870164c3bbd8ec",
+      "before": "eaafa126f2aaea4deb1db36dcebc1f511f41820c",
+      "entry": "reusable-workflow",
+      "path": ".github/workflows/build-release.yml",
+      "workflow": ".github/workflows/publish-release.yml"
+    },
+    {
+      "after": "5a4bbdb033f16a6d46cbf62c95870164c3bbd8ec",
+      "before": "eaafa126f2aaea4deb1db36dcebc1f511f41820c",
+      "entry": "reusable-workflow",
+      "path": ".github/workflows/update-inputs.yml",
+      "workflow": ".github/workflows/security-proposal.yml"
+    },
+    {
+      "after": "5a4bbdb033f16a6d46cbf62c95870164c3bbd8ec",
+      "before": "eaafa126f2aaea4deb1db36dcebc1f511f41820c",
+      "entry": "reusable-workflow",
+      "path": ".github/workflows/security-review.yml",
+      "workflow": ".github/workflows/security-review.yml"
+    },
+    {
+      "after": "5a4bbdb033f16a6d46cbf62c95870164c3bbd8ec",
+      "before": "eaafa126f2aaea4deb1db36dcebc1f511f41820c",
+      "entry": "reusable-workflow",
+      "path": ".github/workflows/cleanup-artifacts.yml",
+      "workflow": ".github/workflows/cleanup-artifacts.yml"
+    }
+  ],
+  "platform": {
+    "actual_human_review_id": 5664947213,
+    "approved_head": "7b96b40c89a4003e7406f42387a21af6e5b042a8",
+    "pilot_result": "pass",
+    "pilot_sha256": "5463119a95cc53e4fcb846d0b03af40b04f22541e68c13bae05cc5c05ca29e78",
+    "publication_audit": "https://github.com/Lanrith/lanrith/releases/tag/audit-publication-40494583701-1",
+    "retained_assessment": "https://github.com/Lanrith/lanrith/releases/tag/assessment-20261027T133409Z-28a734bdc259",
+    "source_commit": "5a4bbdb033f16a6d46cbf62c95870164c3bbd8ec",
+    "source_pr": 19,
+    "tag": "v0.1.8"
+  },
+  "production_qualified": false,
+  "reason": "Adopt the human-reviewed and immutably released PR19 proposal-tracking repair. The proposer must read its preserved artifact after PR checkout cleanup; proposer and reviewer producer identities must pin the same trusted implementation.",
+  "repository": "Lanrith/discovery-bridge",
+  "schema": 1,
+  "validation": {
+    "checks": [
+      "Only four workflow source pins change, with five exact trust references.",
+      "Reusable workflow input and permission contracts match the actual verified protected Main source.",
+      "Pinned actionlint passes. Policy, dependencies, runtime/native source and required CI definitions remain byte-identical."
+    ],
+    "hosted": "Fresh full component CI must cover the final published head; local configuration checks do not qualify a build.",
+    "result": "local-configuration-pass"
+  }
+}
