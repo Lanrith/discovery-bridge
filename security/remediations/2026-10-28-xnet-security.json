@@ -1,0 +1,117 @@
+{
+  "advisories": [
+    {
+      "fixed": "v0.62.0",
+      "go_database_source": "https://vuln.go.dev/ID/GO-2026-6860.json",
+      "id": "GO-2026-6860",
+      "sha256": "bd5dc7cc6dc2825c4ad0678add58362fd74eb8ea836d81e49aedd91ee4a4e0fa",
+      "source": "https://api.osv.dev/v1/vulns/GO-2026-6860"
+    },
+    {
+      "fixed": "v0.62.0",
+      "go_database_source": "https://vuln.go.dev/ID/GO-2026-6866.json",
+      "id": "GO-2026-6866",
+      "sha256": "5a89a571fe073b0b2ad77d52a3612c906e1396101c9f976c61161abee364d0c4",
+      "source": "https://api.osv.dev/v1/vulns/GO-2026-6866"
+    }
+  ],
+  "approval": "This minor-version security migration requires a fresh independent human GitHub approval of the final source head. No automatic App approval or protection bypass is requested.",
+  "base_commit": "b49a9147750d1f44d92da8e495fef2d94b7c31ed",
+  "created_at": "2026-10-28T09:08:18.594293+00:00",
+  "kind": "reviewed-xnet-security-module-migration",
+  "module_provenance": {
+    "GOPROXY": "https://proxy.golang.org",
+    "GOSUMDB": "sum.golang.org",
+    "GOTOOLCHAIN": "local",
+    "checksums": "go mod verify passed after checksum-database-authenticated downloads and final tidy.",
+    "xnet_go_mod_sha256": "7bbcec6b6af859939ec01bbe5234e556c867bf80e171abc23ad16c2c8e3951fe",
+    "xnet_sumdb": {
+      "GoModSum": "h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=",
+      "Origin": {
+        "Hash": "3de643db506517b3e652a13cc0b56034cea6b8e6",
+        "Ref": "refs/tags/v0.62.0",
+        "URL": "https://go.googlesource.com/net",
+        "VCS": "git"
+      },
+      "Path": "golang.org/x/net",
+      "Sum": "h1:18ELalfM5+XNRwzM2nYqXsZQ9ByS1uhj2O/U7+5jqRY=",
+      "Version": "v0.62.0"
+    }
+  },
+  "module_selection": {
+    "golang.org/x/net": {
+      "after": "v0.62.0",
+      "before": "v0.60.0",
+      "reason": "Lowest stable fixed version recorded by both advisories."
+    },
+    "golang.org/x/sys": {
+      "after": "v0.49.0",
+      "before": "v0.48.0",
+      "reason": "Minimum required by the authenticated x/net v0.62.0 go.mod."
+    },
+    "golang.org/x/text": {
+      "after": "v0.43.0",
+      "before": "v0.42.0",
+      "reason": "Minimum required by the authenticated x/net v0.62.0 go.mod."
+    }
+  },
+  "published_binary_before": {
+    "binary_sha256": "eec4ea50b327b279db3622973efbe94b6ebfc3a678c1439ba8c34ff4b8c021d0",
+    "limits": "A fresh local default build reported only module-level findings, so it is not used as evidence about the published binary. No runtime exploitability claim is made.",
+    "package_sha256": "19fd96270e3451389287cbfae3466bcfd281dabd41ea9065ed8e5fc93a063fe0",
+    "release": "v0.1.3",
+    "scanner_result": "Both advisory IDs report vulnerable symbols in the exact published binary."
+  },
+  "qualification_limits": "Local tests and scans do not replace full hosted native amd64/arm64, namespace, packaging and container qualification. The immutable component release and later platform selection/publication must be verified before calling the platform remediated.",
+  "reason": "The signed retained platform assessment and an independent fresh scan of the exact immutable Discovery v0.1.3 package report GO-2026-6860 and GO-2026-6866 in x/net v0.60.0. Both advisories identify v0.62.0 as the fixed version. The normal updater correctly stops because this is outside its automatic patch line.",
+  "repository": "Lanrith/discovery-bridge",
+  "schema": 1,
+  "tracked_issues": [
+    "https://github.com/Lanrith/discovery-bridge/issues/9",
+    "https://github.com/Lanrith/lanrith/issues/22"
+  ],
+  "unchanged": [
+    "Module path, Go directive, compiler pin, requirement names and indirect roles.",
+    "Application source, workflows, required policy, native security controls and review gates."
+  ],
+  "updater_blocked_run": "https://github.com/Lanrith/discovery-bridge/actions/runs/40640947375",
+  "validation": {
+    "binary_scan": "No vulnerabilities found.",
+    "formatting": "pass",
+    "go": "1.27.3",
+    "logs_sha256": {
+      "baseline-scanner-exit.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "binary-vulnerabilities-after.txt": "3016e51e4eac0d421674d2128bbbdefb2924b4646e0c14a1ab034977ad73fae5",
+      "final-go.sum": "a552c819a9bcd9c8ab13b5f99ab4e221f9d642d65d95ef0ae5c1cb6e8542ddfc",
+      "final-tidy.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "module-graph.txt": "c1b260e151917b35358f2f536e93e283e95ba98dfc696f38e62d232313cc773a",
+      "modules-after.txt": "b4537ed75f533f993f371954de47e42a793b8e5b0587577de7e27fb3e50696bd",
+      "modules-before.txt": "b4537ed75f533f993f371954de47e42a793b8e5b0587577de7e27fb3e50696bd",
+      "released-v013-vulnerabilities.txt": "74bcc9669089cb87e00e945538252aa9f8f855b2f46cf222305b3f0965e898d3",
+      "result.txt": "9f56e761d79bfdb34304a012586cb04d16b435ef6130091a97702e559260a2f2",
+      "selected-modules.json": "e7ef94c015e6604d74b02293180f1cf216c0c50870843bf23c64a0791385f672",
+      "source-boundary.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source-vulnerabilities-after.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "source-vulnerabilities-after.txt": "3016e51e4eac0d421674d2128bbbdefb2924b4646e0c14a1ab034977ad73fae5",
+      "static-binary-vulnerabilities-after.txt": "3016e51e4eac0d421674d2128bbbdefb2924b4646e0c14a1ab034977ad73fae5",
+      "tests.txt": "53ace8eafd9594d5adfef7953eb546598b2127dbd6bdc3d0657ba950f11c5a7c",
+      "tidy.txt": "45baa06535157a519b0fa6ede3f9f99a93d21172af8cfa9c158b19e57792ea14",
+      "toolchain.txt": "5707bf75dd54b4fdd5ac209444d48c9c4179ebf8510f80e2f7293dfbedc1012b",
+      "upgrade.txt": "aa679ec78def259ecff0bb34bfbb5c3d9f04d58e05b94fe0c2fedf30297e0290",
+      "vet.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "vulnerabilities-before.txt": "1f4ef7e4b8ea5af40066a49c0ff3c7f3c4f8fe0f77b7f8c421cdb56b64c0fa79",
+      "xnet-sumdb.json": "823084e198a9a70079b0f4c42ad74b03e45314718aa570066ea499a7675e5a57",
+      "xnet-v0.62.0.go.mod": "7bbcec6b6af859939ec01bbe5234e556c867bf80e171abc23ad16c2c8e3951fe"
+    },
+    "module_verify": "pass",
+    "race_shuffled_tests": "pass",
+    "scanner": "golang.org/x/vuln/cmd/govulncheck@v1.9.0",
+    "source_boundary": "pass",
+    "source_scan": "No vulnerabilities found.",
+    "static_stripped_binary_scan": "No vulnerabilities found.",
+    "tool_image": "docker.io/library/golang@sha256:fea12ba16096adec0f699ce1c4da2154d320450e56c1f63671f95d2a3551c77b",
+    "vet": "pass",
+    "whitespace": "pass"
+  },
+  "verified_prior_assessment": "https://github.com/Lanrith/lanrith/releases/tag/assessment-20261028T061732Z-28a734bdc259"
+}
