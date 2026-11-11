@@ -31,7 +31,13 @@ func parseConfig(data []byte, profile config.Translator, spaces catalog.Translat
 	}
 	seen := make(map[string]bool)
 	maps, aliases := make(map[netip.Addr]netip.Addr), make(map[netip.Addr]bool)
-	aliasPolicy, err := policy.New(map[string][]string{"alias": {spaces.Pool.String()}}, nil)
+	pool := spaces.Pool.String()
+	reserved := spaces.Reserved
+	if !nat46 {
+		pool = profile.DynamicPool
+		reserved = []netip.Addr{netip.MustParseAddr(profile.IPv4)} // New validates the immutable profile.
+	}
+	aliasPolicy, err := policy.New(map[string][]string{"alias": {pool}}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -42,10 +48,10 @@ func parseConfig(data []byte, profile config.Translator, spaces catalog.Translat
 		if len(fields) == 0 {
 			continue
 		}
-		if nat46 && len(fields) == 3 && fields[0] == "map" {
+		if len(fields) == 3 && fields[0] == "map" {
 			alias, err4 := netip.ParseAddr(fields[1])
 			target, err6 := netip.ParseAddr(fields[2])
-			if err4 != nil || err6 != nil || aliasPolicy.CheckAddress("alias", alias) != nil || slices.Contains(spaces.Reserved, alias) || !target.Is6() || target.Is4In6() || target.Zone() != "" || !target.IsGlobalUnicast() || target.IsLinkLocalUnicast() || prefix.Contains(target) || spaces.NAT64.Contains(target) || aliases[alias] || maps[target].IsValid() || len(maps) >= catalog.MaxRecords {
+			if err4 != nil || err6 != nil || aliasPolicy.CheckAddress("alias", alias) != nil || slices.Contains(reserved, alias) || !target.Is6() || target.Is4In6() || target.Zone() != "" || !target.IsGlobalUnicast() || target.IsLinkLocalUnicast() || prefix.Contains(target) || spaces.NAT64.Contains(target) || aliases[alias] || maps[target].IsValid() || len(maps) >= catalog.MaxRecords {
 				return nil, errors.New("invalid or duplicate static translator map")
 			}
 			maps[target], aliases[alias] = alias, true
@@ -56,7 +62,13 @@ func parseConfig(data []byte, profile config.Translator, spaces catalog.Translat
 		}
 		seen[fields[0]] = true
 	}
-	if len(seen) != len(expected) || nat46 && len(maps) == 0 {
+	// Static NAT46 has no allocator state. Accept its absent data-dir while
+	// still checking the exact configured path when an older image includes it.
+	required := len(expected)
+	if nat46 && !seen["data-dir"] {
+		required--
+	}
+	if len(seen) != required || nat46 && len(maps) == 0 {
 		return nil, errors.New("incomplete immutable translator profile")
 	}
 	return maps, nil
