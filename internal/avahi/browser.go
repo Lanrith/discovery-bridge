@@ -13,6 +13,7 @@ import (
 
 	"github.com/godbus/dbus/v5"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
+	"github.com/lanrith/discovery-bridge/internal/config"
 	"github.com/lanrith/discovery-bridge/internal/dnswire"
 	"github.com/lanrith/discovery-bridge/internal/observation"
 	"github.com/miekg/dns"
@@ -33,6 +34,14 @@ type Event struct {
 	Added, Cached bool
 }
 
+const (
+	maxBrowserObjects = 1024 // Packaged Avahi per-client ceiling.
+	watchIdle         = 120 * time.Second
+)
+
+// ErrBrowserCapacity lets a native caller continue its already scoped wire lookup.
+var ErrBrowserCapacity = errors.New("avahi browser capacity reached")
+
 type seenKey struct {
 	path dbus.ObjectPath
 	data string
@@ -41,18 +50,22 @@ type seenKey struct {
 // Browser owns one Avahi connection epoch. Next has one consumer; Watch, Follow
 // and Retire may be called concurrently. Closing frees all connection-owned browsers.
 type Browser struct {
-	bus        *bus
-	epoch      string
-	links      map[int]observation.Link
-	operations sync.Mutex
-	mu         sync.Mutex
-	paths      map[dbus.ObjectPath]Query
-	queries    map[Query]dbus.ObjectPath
-	seen       map[seenKey]dns.RR
-	touched    map[Query]time.Time
-	permanent  map[Query]bool
-	native     map[dbus.ObjectPath]bool
-	deferred   uint64
+	bus          *bus
+	epoch        string
+	links        map[int]observation.Link
+	operations   sync.Mutex // Serializes Prepare, Free, seeding and the retry queue.
+	mu           sync.Mutex // Protects fields also observed by Next and Counts.
+	paths        map[dbus.ObjectPath]Query
+	queries      map[Query]dbus.ObjectPath
+	seen         map[seenKey]dns.RR
+	touched      map[Query]time.Time
+	permanent    map[Query]bool
+	pendingSeeds int
+	native       map[dbus.ObjectPath]bool
+	objectLimit  int
+	waiting      map[Query]time.Time
+	order        []Query
+	deferred     uint64
 }
 
 // ConnectBrowser opens a local D-Bus connection and verifies a stable running Avahi.
@@ -80,7 +93,7 @@ func newBrowser(links map[int]observation.Link) (*Browser, error) {
 	return &Browser{epoch: hex.EncodeToString(token[:]), links: links,
 		paths: make(map[dbus.ObjectPath]Query), queries: make(map[Query]dbus.ObjectPath),
 		seen: make(map[seenKey]dns.RR), touched: make(map[Query]time.Time), permanent: make(map[Query]bool),
-		native: make(map[dbus.ObjectPath]bool)}, nil
+		native: make(map[dbus.ObjectPath]bool), objectLimit: maxBrowserObjects, waiting: make(map[Query]time.Time)}, nil
 }
 
 func copyLinks(links map[int]observation.Link) (map[int]observation.Link, error) {
@@ -131,9 +144,47 @@ func (b *Browser) normalize(query Query) (Query, error) {
 	return query, nil
 }
 
-// Watch coalesces demand. At the 1024-browser limit it defers new watches while
-// keeping admitted observations alive; retirement can make room for a retry.
+// freeSlots includes prepared browsers until Free is acknowledged, and protects
+// declared seeds before their objects exist. Callers hold operations.
+func (b *Browser) freeSlots() int {
+	return b.objectLimit - len(b.queries) - len(b.native) - b.pendingSeeds
+}
+
+// prepare serializes allocations on this private connection. Avahi rejects a
+// full client's Prepare before creating an object, so its reply reveals the
+// configured limit even when it is smaller than the packaged default.
+func (b *Browser) prepare(ctx context.Context, query Query, name string) (dbus.ObjectPath, error) {
+	protocol := int32(0)
+	if query.Family == 6 {
+		protocol = 1
+	}
+	var path dbus.ObjectPath
+	err := b.bus.call(ctx, "/", server2+".RecordBrowserPrepare", int32(query.Interface), protocol, name, uint16(dns.ClassINET), query.Type, uint32(2)).Store(&path)
+	var remote dbus.Error
+	if errors.As(err, &remote) && strings.HasPrefix(remote.Name, service+".") {
+		if remote.Name == service+".TooManyObjectsError" {
+			b.objectLimit = len(b.queries) + len(b.native)
+			return "", ErrBrowserCapacity
+		}
+		return "", err // An explicit application refusal allocated no object.
+	}
+	_, catalogPath := b.paths[path]
+	if err == nil && (!path.IsValid() || path == "/" || b.native[path] || catalogPath) {
+		err = errors.New("invalid or reused Avahi browser path")
+	}
+	if err != nil {
+		// A missing or malformed Prepare reply can leave an unaccounted object.
+		b.bus.fail(errors.New("avahi browser setup failed; discard observation epoch"))
+	}
+	return path, err
+}
+
+// Watch coalesces demand. Distinct excess watches enter a bounded retry queue.
 func (b *Browser) Watch(ctx context.Context, query Query) (bool, error) {
+	return b.watch(ctx, query, true)
+}
+
+func (b *Browser) watch(ctx context.Context, query Query, clientDemand bool) (bool, error) {
 	query, err := b.normalize(query)
 	if err != nil {
 		return false, err
@@ -143,46 +194,75 @@ func (b *Browser) Watch(ctx context.Context, query Query) (bool, error) {
 	if err := b.Err(); err != nil {
 		return false, err
 	}
-	b.mu.Lock()
 	if _, ok := b.queries[query]; ok {
 		b.touched[query] = time.Now()
-		b.mu.Unlock()
 		return true, nil
 	}
-	if len(b.queries) >= 1024 {
-		b.deferred++
-		b.mu.Unlock()
-		return false, nil
+	// Give the oldest deferred work its turn. Required seed watches already
+	// own a reservation and are installed before ordinary demand.
+	first := len(b.order) > 0 && b.order[0] == query
+	if b.permanent[query] || (b.pendingSeeds == 0 && (len(b.order) == 0 || first) && b.freeSlots() > 0) {
+		admitted, err := b.startWatch(ctx, query)
+		if first && admitted {
+			b.popWaiting()
+		}
+		if admitted || err != nil || b.permanent[query] {
+			return admitted, err
+		}
 	}
+	b.enqueue(query, clientDemand)
+	b.mu.Lock()
+	b.deferred++
 	b.mu.Unlock()
+	return false, nil
+}
+
+func (b *Browser) enqueue(query Query, clientDemand bool) {
+	if _, queued := b.waiting[query]; !queued {
+		if len(b.order) >= maxBrowserObjects {
+			return
+		}
+		b.order = append(b.order, query)
+		b.waiting[query] = time.Time{} // A dependency alone must still have a live parent.
+	}
+	if clientDemand {
+		b.waiting[query] = time.Now()
+	}
+}
+
+func (b *Browser) popWaiting() {
+	delete(b.waiting, b.order[0])
+	b.order[0] = Query{}
+	b.order = b.order[1:]
+}
+
+func (b *Browser) startWatch(ctx context.Context, query Query) (bool, error) {
 	name, err := avahiName(query.Name)
 	if err != nil {
 		return false, err
 	}
-	protocol := int32(0)
-	if query.Family == 6 {
-		protocol = 1
+	if err := ctx.Err(); err != nil {
+		return false, err
 	}
-	var path dbus.ObjectPath
-	err = b.bus.call(ctx, "/", server2+".RecordBrowserPrepare", int32(query.Interface), protocol, name, uint16(dns.ClassINET), query.Type, uint32(2)).Store(&path)
-	if err == nil && (!path.IsValid() || path == "/") {
-		err = errors.New("invalid Avahi browser path")
-	}
-	if err == nil {
-		b.mu.Lock()
-		if _, reused := b.paths[path]; reused {
-			err = errors.New("avahi reused an active browser path")
-		} else {
-			// Install routing before Start can deliver its first cached signal.
-			b.paths[path], b.queries[query], b.touched[query] = query, path, time.Now()
-		}
-		b.mu.Unlock()
-	}
-	if err == nil {
-		err = b.bus.call(ctx, path, browserInterface+".Start").Err
+	// A caller may leave while Prepare is in flight. Finish accounting for the
+	// result within the D-Bus call deadline; epoch loss closes the transport.
+	path, err := b.prepare(context.WithoutCancel(ctx), query, name)
+	if errors.Is(err, ErrBrowserCapacity) {
+		return false, b.Err()
 	}
 	if err != nil {
 		b.bus.fail(errors.New("avahi browser setup failed; discard observation epoch"))
+		return false, err
+	}
+	// Install routing before Start can deliver its first cached signal.
+	b.mu.Lock()
+	b.paths[path], b.queries[query], b.touched[query] = query, path, time.Now()
+	if b.permanent[query] {
+		b.pendingSeeds--
+	}
+	b.mu.Unlock()
+	if err := b.bus.call(context.WithoutCancel(ctx), path, browserInterface+".Start").Err; err != nil {
+		b.bus.fail(errors.New("avahi browser start failed; discard observation epoch"))
 		return false, err
 	}
 	return true, b.Err()
@@ -196,85 +276,101 @@ func (b *Browser) WatchNative(ctx context.Context, query Query) (func() error, e
 	if !ok || !slices.Contains(link.Families, query.Family) || !dnswire.Name(query.Name) || query.Type == 0 || query.Type == dns.TypeANY {
 		return nil, errors.New("unapproved native Avahi query")
 	}
+	name, err := nativeAvahiName(query.Name)
+	if err != nil {
+		return nil, err
+	}
 	b.operations.Lock()
 	defer b.operations.Unlock()
 	if err := b.Err(); err != nil {
 		return nil, err
 	}
-	b.mu.Lock()
-	full := len(b.paths)+len(b.native) >= 1024
-	b.mu.Unlock()
-	if full {
-		return nil, errors.New("native Avahi browser capacity exceeded")
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	name, err := nativeAvahiName(query.Name)
+	// Leave the next available slot for the oldest deferred catalog interest.
+	freeSlots := b.freeSlots()
+	if b.pendingSeeds > 0 || freeSlots <= 0 || (len(b.order) > 0 && freeSlots == 1) {
+		return nil, ErrBrowserCapacity
+	}
+	path, err := b.prepare(context.WithoutCancel(ctx), query, name)
 	if err != nil {
 		return nil, err
 	}
-	protocol := int32(0)
-	if query.Family == 6 {
-		protocol = 1
-	}
-	var path dbus.ObjectPath
-	err = b.bus.call(ctx, "/", server2+".RecordBrowserPrepare", int32(query.Interface), protocol, name, uint16(dns.ClassINET), query.Type, uint32(2)).Store(&path)
-	if err != nil {
-		return nil, err
-	}
-	if !path.IsValid() || path == "/" {
-		return nil, errors.New("invalid native Avahi browser path")
-	}
 	b.mu.Lock()
-	_, catalogPath := b.paths[path]
-	reused := catalogPath || b.native[path]
-	if !reused {
-		b.native[path] = true
-	}
+	b.native[path] = true
 	b.mu.Unlock()
-	if reused {
-		b.bus.fail(errors.New("avahi reused a native browser path"))
-		return nil, b.Err()
-	}
-	var once sync.Once
-	var closeErr error
-	cleanup := func() error {
-		once.Do(func() {
-			b.mu.Lock()
-			delete(b.native, path)
-			b.mu.Unlock()
-			if b.Err() != nil {
-				return
-			}
-			bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-			defer cancel()
-			closeErr = b.bus.call(bounded, path, browserInterface+".Free").Err
-			if closeErr != nil {
-				b.bus.fail(errors.New("native Avahi browser release failed"))
-			}
-		})
-		return closeErr
+	free := func() error {
+		if b.Err() != nil {
+			return nil // Teardown releases all objects owned by this connection.
+		}
+		bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		if err := b.bus.call(bounded, path, browserInterface+".Free").Err; err != nil {
+			b.bus.fail(errors.New("native Avahi browser release failed"))
+			return err
+		}
+		b.mu.Lock()
+		delete(b.native, path)
+		b.mu.Unlock()
+		return nil
 	}
 	if err := b.bus.call(ctx, path, browserInterface+".Start").Err; err != nil {
-		return nil, errors.Join(err, cleanup())
+		return nil, errors.Join(err, free())
 	}
-	return cleanup, nil
+	return sync.OnceValue(func() error {
+		b.operations.Lock()
+		defer b.operations.Unlock()
+		return free()
+	}), nil
 }
 
-// Seed asks the standard DNS-SD enumeration question on every approved family.
-func (b *Browser) Seed(ctx context.Context) error {
-	indices := slices.Sorted(maps.Keys(b.links))
-	for _, index := range indices {
+// Seed installs enumeration and configured interests for this connection epoch.
+// Reserve their slots before calls start so incoming hints can be consumed
+// concurrently and dependent browsers cannot crowd out the remaining seeds.
+func (b *Browser) Seed(ctx context.Context, configured ...config.Bootstrap) error {
+	interests := config.BootstrapInterests(configured)
+	var queries []Query
+	for _, index := range slices.Sorted(maps.Keys(b.links)) {
 		for _, family := range b.links[index].Families {
-			query := Query{index, family, catalog.Enumeration, dns.TypePTR}
-			admitted, err := b.Watch(ctx, query)
-			if err != nil {
-				return err
+			for _, interest := range interests {
+				queries = append(queries, Query{index, family, interest.Name, dns.StringToType[interest.Type]})
 			}
-			if !admitted {
-				return errors.New("avahi seed browser capacity exceeded")
+		}
+	}
+	if len(queries) > config.MaxPermanentBrowsers {
+		return errors.New("avahi permanent browser budget exceeded")
+	}
+	b.operations.Lock()
+	b.mu.Lock()
+	var newSeeds, newObjects int
+	for _, query := range queries {
+		if !b.permanent[query] {
+			newSeeds++
+			if b.queries[query] == "" {
+				newObjects++
 			}
-			b.mu.Lock()
-			b.permanent[query] = true
-			b.mu.Unlock()
+		}
+	}
+	if len(b.permanent)+newSeeds > config.MaxPermanentBrowsers ||
+		newObjects > b.freeSlots() {
+		b.mu.Unlock()
+		b.operations.Unlock()
+		return errors.New("avahi seed browser capacity exceeded")
+	}
+	b.pendingSeeds += newObjects
+	for _, query := range queries {
+		b.permanent[query] = true
+	}
+	b.mu.Unlock()
+	b.operations.Unlock()
+	for _, query := range queries {
+		admitted, err := b.Watch(ctx, query)
+		if err != nil {
+			return err
+		}
+		if !admitted {
+			return errors.New("avahi seed browser capacity exceeded")
 		}
 	}
 	return nil
@@ -305,7 +401,7 @@ func (b *Browser) Follow(ctx context.Context, event Event) error {
 		return nil
 	}
 	for _, query := range dependencies(event.Query, event.Record.RR) {
-		if _, err := b.Watch(ctx, query); err != nil {
+		if _, err := b.watch(ctx, query, false); err != nil {
 			return err
 		}
 	}
@@ -327,21 +423,55 @@ func (b *Browser) Retire(ctx context.Context) error {
 			needed[query] = true
 		}
 	}
-	var retired []dbus.ObjectPath
+	var retired []Query
 	for query, path := range b.queries {
-		if !b.permanent[query] && !needed[query] && !active[path] && time.Since(b.touched[query]) >= 120*time.Second {
+		if !b.permanent[query] && !needed[query] && !active[path] && time.Since(b.touched[query]) >= watchIdle {
 			// Remove routing first so late signals cannot revive a retired watch.
 			delete(b.paths, path)
-			delete(b.queries, query)
 			delete(b.touched, query)
-			retired = append(retired, path)
+			retired = append(retired, query)
 		}
 	}
 	b.mu.Unlock()
-	for _, path := range retired {
-		if err := b.bus.call(ctx, path, browserInterface+".Free").Err; err != nil {
+	for _, query := range retired {
+		if err := b.bus.call(ctx, b.queries[query], browserInterface+".Free").Err; err != nil {
 			b.bus.fail(errors.New("avahi browser retirement failed"))
 			return err
+		}
+		b.mu.Lock()
+		delete(b.queries, query)
+		b.mu.Unlock()
+	}
+	return b.retryDeferred(ctx, needed)
+}
+
+func (b *Browser) retryDeferred(ctx context.Context, needed map[Query]bool) error {
+	// Service a bounded batch on the existing publication tick. A live
+	// dependency remains eligible after the ordinary demand window expires.
+	retryUntil := time.Now().Add(50 * time.Millisecond)
+	for attempts := 0; len(b.order) > 0 && attempts < 8 && time.Now().Before(retryUntil); attempts++ {
+		query := b.order[0]
+		if b.queries[query] == "" && (needed[query] || time.Since(b.waiting[query]) < watchIdle) {
+			if b.pendingSeeds > 0 || b.freeSlots() <= 0 {
+				break
+			}
+			admitted, err := b.startWatch(ctx, query)
+			if err != nil {
+				return err
+			}
+			if !admitted {
+				break
+			}
+		}
+		b.popWaiting()
+	}
+	// A live parent can outlast a full retry queue without emitting a new hint.
+	for query := range needed {
+		if len(b.order) >= maxBrowserObjects {
+			break
+		}
+		if b.queries[query] == "" {
+			b.enqueue(query, false)
 		}
 	}
 	return b.Err()

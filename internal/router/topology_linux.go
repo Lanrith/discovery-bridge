@@ -56,7 +56,7 @@ func capture(settings config.Router, receive bool) (_ *topology, err error) {
 		slices.Sort(families)
 		var local []netip.Addr
 		for _, address := range iface.Addresses {
-			linkLocal := address.Is6() && address.IsLinkLocalUnicast()
+			linkLocal := address.Is6() && address.IsLinkLocalUnicast() && !scopes.Excludes(address)
 			if linkLocal || scopes.CheckAddress(lan.Source, address) == nil {
 				local = append(local, address)
 			}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"maps"
 	"strings"
 	"time"
 
@@ -39,46 +38,6 @@ func (s *Identities) RotateAlias(ctx context.Context, alias string) (string, err
 	}
 	_, replacement, err := s.Alias(ctx, source, name, true)
 	return replacement, err
-}
-
-// ResolveConflicts suppresses original hosts before rotating stable aliases.
-// Avahi reports collisions for a whole group, without identifying its record.
-func (s *Identities) ResolveConflicts(ctx context.Context, names []string) error {
-	if len(names) > catalog.MaxRecords {
-		return errors.New("conflict name limit")
-	}
-	originals := make(map[string]bool)
-	for _, name := range names {
-		if !catalog.LocalName(name) {
-			return errors.New("local conflict name required")
-		}
-		owned, err := s.Owns(ctx, name)
-		if err != nil {
-			return err
-		}
-		if !owned {
-			originals[catalog.NameKey(name)] = true
-		}
-	}
-	if len(originals) > 0 {
-		s.mu.Lock()
-		maps.Copy(s.suppressed, originals)
-		s.mu.Unlock()
-		return nil
-	}
-	for _, name := range names {
-		if _, err := s.RotateAlias(ctx, name); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// SuppressedHosts returns original hosts withheld after an Avahi collision.
-func (s *Identities) SuppressedHosts() map[string]bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return maps.Clone(s.suppressed)
 }
 
 // Compile builds coherent source-scoped aliases without extending source expiry.

@@ -44,7 +44,8 @@ func TestLANOwnershipAndPodNamesHaveIndependentViews(t *testing.T) {
 	now := catalog.Moment{Wall: time.Now().UTC(), Mono: time.Minute}
 	records := deviceRecords(t, now.Wall)
 	links := map[int]observation.Link{2: {Source: "lan-a", Generation: "a", Families: []int{4, 6}}, 3: {Source: "lan-b", Generation: "b", Families: []int{6}}}
-	groups, err := lanGroups(ctx, records, identities, links, now)
+	c := collector{identities: identities}
+	groups, err := c.lanGroups(ctx, records, links, now, "")
 	if err != nil || len(groups) != 3 {
 		t.Fatal(groups, err)
 	}
@@ -78,7 +79,7 @@ func TestLANOwnershipAndPodNamesHaveIndependentViews(t *testing.T) {
 	for i := 4; i < 6; i++ {
 		records[i].Expires = now.Wall.Add(4 * time.Second)
 	}
-	groups, err = lanGroups(ctx, records, identities, links, now)
+	groups, err = c.lanGroups(ctx, records, links, now, "")
 	if err != nil || len(podView(records, now.Wall)) != 6 {
 		t.Fatal("early LAN withdrawal changed pod TTLs or exposed incomplete chains", groups, err)
 	}
@@ -123,7 +124,7 @@ func TestOptionalServiceCannotExhaustNativeLANPublication(t *testing.T) {
 	links := map[int]observation.Link{2: {Source: "lan-a", Families: []int{4, 6}}, 3: {Source: "lan-b", Families: []int{4, 6}}}
 	c := collector{identities: identities, services: receiver}
 	records, groups, err := c.views(ctx, native, links, now)
-	if err != nil || len(records) != len(native) || len(groups) != 4 {
+	if err != nil || len(records) != len(native)+5 || len(groups) != 4 {
 		t.Fatal("optional Service interrupted native discovery", len(records), len(groups), err)
 	}
 	for _, group := range groups {

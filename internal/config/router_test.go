@@ -2,8 +2,10 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -78,5 +80,25 @@ func TestNativeListenerRequiresSeparateReadOnlyAuthority(t *testing.T) {
 		if err := r.Validate(); err == nil {
 			t.Fatal("unsafe native listener accepted")
 		}
+	}
+}
+
+func TestBootstrapBudgetCountsDistinctScopedWatches(t *testing.T) {
+	r := routerFixture()
+	for i := 1; i < 6; i++ {
+		name := fmt.Sprintf("lan%d", i)
+		r.Interfaces = append(r.Interfaces, LAN{Interface: name, Source: name, Families: []int{4, 6}})
+		r.Sources[name] = []string{fmt.Sprintf("198.51.%d.0/24", i)}
+	}
+	for i := range 41 {
+		r.Bootstrap = append(r.Bootstrap, Bootstrap{Name: fmt.Sprintf("_s%d._tcp.local.", i), Type: "PTR"})
+	}
+	r.Bootstrap = append(r.Bootstrap, Bootstrap{Name: "_S1._TCP.LOCAL.", Type: "PTR"})
+	if err := r.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	r.Bootstrap = append(r.Bootstrap, Bootstrap{Name: "_extra._tcp.local.", Type: "PTR"})
+	if err := r.Validate(); err == nil || !strings.Contains(err.Error(), "512 permanent") {
+		t.Fatal("unbounded permanent demand", err)
 	}
 }

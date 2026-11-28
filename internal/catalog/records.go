@@ -154,7 +154,10 @@ func ResponseView(records []TimedRecord, authority Authority) []Answer {
 	dedup := make(map[string]Answer)
 	for _, a := range view {
 		key := a.Key()
-		if previous, ok := dedup[key]; !ok || a.RR.Header().Ttl < previous.RR.Header().Ttl {
+		// Shared enumeration can have equally fresh evidence from two sources.
+		// Keep its publication identity stable across map iteration orders.
+		if previous, ok := dedup[key]; !ok || a.RR.Header().Ttl < previous.RR.Header().Ttl ||
+			a.RR.Header().Ttl == previous.RR.Header().Ttl && a.Source < previous.Source {
 			dedup[key] = a
 		}
 	}
