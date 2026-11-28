@@ -64,8 +64,31 @@ The additional second reserves time for supervisor and daemon scheduling.
 Shorter leases retain a one-second TTL. A TTL change replaces the registration;
 an unchanged renewal extends only its supervised deadline, without republishing.
 Disconnect, invalid replacement or an expired lease withdraws ownership.
-Run groups concurrently within the twelve-group bound; retain each group's
-ordered D-Bus calls. A stalled D-Bus writer cannot extend a publication lease.
+The publisher uses up to 1,024 Avahi objects on its dedicated connection and
+issues up to twelve independent operations concurrently. An address RRset owns
+one object. Each service instance owns its SRV, TXT and browse PTRs and waits
+for its host object to establish. A shared type-enumeration PTR waits for a
+live instance. A collision holds its unique owner on that interface and family.
+The collector rotates a current, reserved alias once. A registration failure
+can retry on fresh submission after one second. A stalled D-Bus writer closes
+the epoch within the lease budget.
+
+Before its first snapshot a receipt-aware producer sends
+`RECEIPTS/1 <collector-generation>\n`. The owner echoes the generation and its
+own topology fingerprint. Each subsequent JSON receipt carries both tokens,
+the submitted sequence, the earliest supervised monotonic deadline in nanoseconds
+(`until_ns`) and one state byte per submitted owner in `states`. Order is by
+interface index, IP family, owner kind (address, instance, enumeration), then
+canonical DNS name. Codes are E (established), P (pending), F (registration
+failure) and C (isolated collision). A receipt observes existing ownership. It
+cannot extend a lease. New peers reject stale, malformed and mismatched receipts.
+
+A v0.1.11 publisher closes on the greeting. The collector reconnects and
+verifies the legacy protocol with an empty snapshot before transmitting records.
+It discards legacy group-wide conflict lists. A legacy producer receives
+`OK` only for a fully established snapshot. Partial results close its session
+without changing persistent names. A matched producer and publisher are required
+to retain independent registrations during partial publication.
 The collector and publisher capture their own topology generations. A link or
 address notification closes captured sockets and withdraws the old epoch before
 reopening. Send-only raw sockets reject incoming packets before receive enqueue;

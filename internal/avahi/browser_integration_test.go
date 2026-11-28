@@ -20,6 +20,7 @@ import (
 
 	"github.com/godbus/dbus/v5"
 	"github.com/lanrith/discovery-bridge/internal/catalog"
+	"github.com/lanrith/discovery-bridge/internal/config"
 	"github.com/lanrith/discovery-bridge/internal/observation"
 	"github.com/lanrith/discovery-bridge/internal/policy"
 	"github.com/miekg/dns"
@@ -114,11 +115,14 @@ func privateBusProcess(t *testing.T) (string, *exec.Cmd) {
 }
 
 type fakeAvahi struct {
-	conn    *dbus.Conn
-	mu      sync.Mutex
-	queries []Query
-	records map[Query]dns.RR
-	freed   []dbus.ObjectPath
+	conn         *dbus.Conn
+	mu           sync.Mutex
+	queries      []Query
+	records      map[Query]dns.RR
+	freed        []dbus.ObjectPath
+	limit        int
+	beforeFree   func(dbus.ObjectPath) *dbus.Error
+	prepareReply func() (dbus.ObjectPath, *dbus.Error)
 }
 
 func avahiFixture(t *testing.T, path string, records map[Query]dns.RR) *fakeAvahi {
@@ -152,6 +156,14 @@ func (f *fakeAvahi) prepare(index, protocol int32, name string, class, kind uint
 	}
 	query := Query{int(index), family, catalog.NameKey(name), kind}
 	f.mu.Lock()
+	if reply := f.prepareReply; reply != nil {
+		f.mu.Unlock()
+		return reply()
+	}
+	if f.limit > 0 && len(f.queries)-len(f.freed) >= f.limit {
+		f.mu.Unlock()
+		return "", dbus.NewError(service+".TooManyObjectsError", []any{"object quota"})
+	}
 	f.queries = append(f.queries, query)
 	path := dbus.ObjectPath(fmt.Sprintf("/browser/%d", len(f.queries)))
 	f.mu.Unlock()
@@ -170,6 +182,14 @@ func (f *fakeAvahi) prepare(index, protocol int32, name string, class, kind uint
 			return nil
 		},
 		"Free": func() *dbus.Error {
+			f.mu.Lock()
+			before := f.beforeFree
+			f.mu.Unlock()
+			if before != nil {
+				if err := before(path); err != nil {
+					return err
+				}
+			}
 			f.mu.Lock()
 			f.freed = append(f.freed, path)
 			f.mu.Unlock()
@@ -367,5 +387,307 @@ func TestStalledAuthenticationClosesSocketWithinDeadline(t *testing.T) {
 	}
 	if time.Since(start) > 4*time.Second {
 		t.Fatal("authentication exceeded its deadline")
+	}
+}
+
+func TestPermanentConfiguredWatchDiscoversLateArrival(t *testing.T) {
+	path := privateBus(t)
+	f := avahiFixture(t, path, nil)
+	links := map[int]observation.Link{2: {Source: "lan-a", Generation: "generation", Families: []int{4}}}
+	configured := config.Bootstrap{Name: "_example._tcp.local.", Type: "PTR"}
+	interest := Query{2, 4, configured.Name, dns.TypePTR}
+	idle := Query{2, 4, "_idle._tcp.local.", dns.TypePTR}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	for range 2 {
+		b, err := ConnectBrowser(ctx, path, links)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Seed(ctx, configured, config.Bootstrap{Name: strings.ToUpper(configured.Name), Type: "PTR"}); err != nil {
+			t.Fatal(err)
+		}
+		if admitted, err := b.Watch(ctx, idle); !admitted || err != nil {
+			t.Fatal(err)
+		}
+		b.mu.Lock()
+		for q := range b.touched {
+			b.touched[q] = time.Now().Add(-121 * time.Second)
+		}
+		b.mu.Unlock()
+		if err := b.Retire(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := b.queries[idle]; ok || len(b.queries) != 2 || b.pendingSeeds != 0 {
+			t.Fatal("unexpected idle watches", b.queries)
+		}
+		rr, err := dns.NewRR("_example._tcp.local. 15 IN PTR Late._example._tcp.local.")
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := rdata(rr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = f.conn.Emit(b.queries[interest], browserInterface+".ItemNew", int32(2), int32(0), configured.Name, uint16(dns.ClassINET), uint16(dns.TypePTR), raw, uint32(4))
+		if err != nil {
+			t.Fatal(err)
+		}
+		event, err := b.Next(ctx)
+		if err != nil || event.Query != interest {
+			t.Fatal(event, err)
+		}
+		cache := observation.New()
+		now := catalog.Now()
+		if err := cache.Hint(event.Epoch, event.Record, true); err != nil {
+			t.Fatal(err)
+		}
+		if records, err := cache.Records(now); err != nil || len(records) != 0 {
+			t.Fatal("empty watch supplied fresh evidence", records, err)
+		}
+		if err := cache.Ingest([]observation.Record{{Source: "lan-a", Generation: "generation", Family: 4, RR: rr}}, now.Mono); err != nil {
+			t.Fatal(err)
+		}
+		if records, err := cache.Records(now); err != nil || len(records) != 1 {
+			t.Fatal("late observation missing", records, err)
+		}
+		b.Close()
+	}
+}
+
+func TestMixedBrowserCapacity(t *testing.T) {
+	for _, discoverLimitWith := range []string{"catalog", "native"} {
+		t.Run(discoverLimitWith, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			path := privateBus(t)
+			record, err := dns.NewRR("online.local. 60 IN A 192.0.2.10")
+			if err != nil {
+				t.Fatal(err)
+			}
+			owned := Query{2, 4, "online.local.", dns.TypeA}
+			next := Query{2, 4, "next.local.", dns.TypeA}
+			f := avahiFixture(t, path, map[Query]dns.RR{owned: record})
+			f.mu.Lock()
+			f.limit = 3
+			f.mu.Unlock()
+			b, err := ConnectBrowser(ctx, path, map[int]observation.Link{2: {Source: "lan", Generation: "link", Families: []int{4}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer b.Close()
+			if err := b.Seed(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if ok, err := b.Watch(ctx, owned); !ok || err != nil {
+				t.Fatal(ok, err)
+			}
+			closeNative, err := b.WatchNative(ctx, next)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if discoverLimitWith == "native" {
+				if _, err := b.WatchNative(ctx, owned); !errors.Is(err, ErrBrowserCapacity) {
+					t.Fatal("unexpected native admission", err)
+				}
+			}
+			if ok, err := b.Watch(ctx, next); ok || err != nil {
+				t.Fatal("distinct catalog watch did not defer", ok, err)
+			}
+			if ok, err := b.Watch(ctx, owned); !ok || err != nil {
+				t.Fatal("reuse at quota failed", ok, err)
+			}
+			if event, err := b.Next(ctx); err != nil || event.Query != owned || !event.Added {
+				t.Fatal("quota interrupted existing observation", event, err)
+			}
+			if b.objectLimit != 3 || len(b.order) != 1 {
+				t.Fatal("explicit daemon quota did not bound local reservations", b.objectLimit, b.order)
+			}
+			started, finish := make(chan struct{}), make(chan struct{})
+			f.mu.Lock()
+			f.beforeFree = func(dbus.ObjectPath) *dbus.Error {
+				close(started)
+				select {
+				case <-finish:
+				case <-ctx.Done():
+				}
+				return nil
+			}
+			f.mu.Unlock()
+			done := make(chan error, 1)
+			go func() { done <- closeNative() }()
+			select {
+			case <-started:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			b.mu.Lock()
+			reserved := len(b.native)
+			b.mu.Unlock()
+			close(finish)
+			if err := <-done; err != nil || reserved != 1 {
+				t.Fatal("object was not retained through Free", reserved, err)
+			}
+			if err := closeNative(); err != nil {
+				t.Fatal("repeated release failed", err)
+			}
+			if _, err := b.WatchNative(ctx, owned); !errors.Is(err, ErrBrowserCapacity) {
+				t.Fatal("new native demand displaced oldest queued interest", err)
+			}
+			if discoverLimitWith == "catalog" {
+				if ok, err := b.Watch(ctx, next); !ok || err != nil {
+					t.Fatal("oldest caller retry did not take the released slot", ok, err)
+				}
+			} else if err := b.Retire(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if b.queries[next] == "" || len(b.order) != 0 {
+				t.Fatal("acknowledged release did not admit deferred interest")
+			}
+			if _, err := f.conn.ReleaseName(service); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := b.Next(ctx); err == nil || b.Err() == nil {
+				t.Fatal("daemon owner loss retained healthy epoch")
+			}
+		})
+	}
+}
+
+func TestSeedReservationsAndUncertainRelease(t *testing.T) {
+	ctx := t.Context()
+	path := privateBus(t)
+	f := avahiFixture(t, path, nil)
+	b, err := ConnectBrowser(ctx, path, map[int]observation.Link{2: {Source: "lan", Generation: "link", Families: []int{4}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	b.objectLimit = 2
+	query := Query{2, 4, "ordinary.local.", dns.TypeA}
+	release, err := b.WatchNative(ctx, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Pause at Seed's reservation boundary, before its per-question Watch.
+	seed := Query{2, 4, catalog.Enumeration, dns.TypePTR}
+	b.permanent[seed], b.pendingSeeds = true, 1
+	if ok, err := b.Watch(ctx, query); ok || err != nil {
+		t.Fatal("catalog borrowed an uninstalled seed", ok, err)
+	}
+	if _, err := b.WatchNative(ctx, query); !errors.Is(err, ErrBrowserCapacity) {
+		t.Fatal("native borrowed an uninstalled seed", err)
+	}
+	if ok, err := b.Watch(ctx, seed); !ok || err != nil || b.pendingSeeds != 0 {
+		t.Fatal("required seed failed to consume its reserved slot", ok, err)
+	}
+
+	f.mu.Lock()
+	f.beforeFree = func(dbus.ObjectPath) *dbus.Error {
+		return dbus.MakeFailedError(errors.New("release unconfirmed"))
+	}
+	f.mu.Unlock()
+	if err := release(); err == nil || b.Err() == nil {
+		t.Fatal("uncertain native release left epoch available")
+	}
+	if ok, err := b.Watch(ctx, query); ok || err == nil {
+		t.Fatal("reused a slot in a failed epoch", ok, err)
+	}
+}
+
+func TestDeferredOrdinaryDemandOrderAndExpiry(t *testing.T) {
+	ctx := t.Context()
+	path := privateBus(t)
+	avahiFixture(t, path, nil)
+	b, err := ConnectBrowser(ctx, path, map[int]observation.Link{2: {Source: "lan", Generation: "link", Families: []int{4}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	b.objectLimit = 2
+	if err := b.Seed(ctx); err != nil {
+		t.Fatal(err)
+	}
+	q := func(name string) Query { return Query{2, 4, name + ".local.", dns.TypeA} }
+	if ok, err := b.Watch(ctx, q("idle")); !ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	parent, err := dns.NewRR("_test._tcp.local. 60 IN PTR Gone._test._tcp.local.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := Event{Epoch: b.Epoch(), Added: true, Query: Query{2, 4, "_test._tcp.local.", dns.TypePTR},
+		Record: observation.Record{RR: parent}}
+	if err := b.Follow(ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"expired", "first", "second", "first"} {
+		if ok, err := b.Watch(ctx, q(name)); ok || err != nil {
+			t.Fatal(ok, err)
+		}
+	}
+	if len(b.order) != 5 {
+		t.Fatal("dependencies or repeated deferred watch used unexpected queue positions", b.order)
+	}
+	old := time.Now().Add(-watchIdle - time.Second)
+	b.touched[q("idle")], b.waiting[q("expired")] = old, old
+	if err := b.Retire(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if b.queries[q("first")] == "" || b.queries[q("expired")] != "" || len(b.order) != 1 || b.order[0] != q("second") {
+		t.Fatal("retired catalog slot failed to serve the oldest eligible interest", b.order)
+	}
+	for i := range maxBrowserObjects {
+		if ok, err := b.Watch(ctx, q(fmt.Sprintf("demand-%d", i))); ok || err != nil {
+			t.Fatal(ok, err)
+		}
+	}
+	if len(b.order) != maxBrowserObjects || len(b.waiting) != len(b.order) {
+		t.Fatal("excess demand exceeded the epoch queue bound", len(b.order), len(b.waiting))
+	}
+}
+
+func TestUnexpectedPrepareReplyFailsClosed(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		path   dbus.ObjectPath
+		err    *dbus.Error
+		native bool
+	}{
+		{name: "root object", path: "/"},
+		{name: "catalog path returned to native", path: "/browser/1", native: true},
+		{name: "native path returned to catalog", path: "/browser/2"},
+		{name: "different daemon error", err: dbus.NewError(service+".TooManyEntriesError", nil)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := t.Context()
+			path := privateBus(t)
+			f := avahiFixture(t, path, nil)
+			b, err := ConnectBrowser(ctx, path, map[int]observation.Link{2: {Source: "lan", Generation: "link", Families: []int{4}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer b.Close()
+			if err := b.Seed(ctx); err != nil {
+				t.Fatal(err)
+			}
+			query := Query{2, 4, "native.local.", dns.TypeA}
+			if _, err := b.WatchNative(ctx, query); err != nil {
+				t.Fatal(err)
+			}
+			f.mu.Lock()
+			f.prepareReply = func() (dbus.ObjectPath, *dbus.Error) { return test.path, test.err }
+			f.mu.Unlock()
+			query.Name = "distinct.local."
+			if test.native {
+				_, err = b.WatchNative(ctx, query)
+			} else {
+				_, err = b.Watch(ctx, query)
+			}
+			if err == nil || b.Err() == nil || errors.Is(err, ErrBrowserCapacity) {
+				t.Fatal("unexpected allocation response was treated as quota", err, b.Err())
+			}
+		})
 	}
 }

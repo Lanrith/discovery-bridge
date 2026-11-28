@@ -45,14 +45,18 @@ func (c *collector) nativeInterest(ctx context.Context, browser *avahi.Browser, 
 				release, err := browser.WatchNative(ctx, avahi.Query{
 					Interface: index, Family: family, Name: question.DNS.Name, Type: question.DNS.Qtype,
 				})
-				if err != nil {
+				if err == nil {
+					cleanups = append(cleanups, release)
+				} else if !errors.Is(err, avahi.ErrBrowserCapacity) {
 					return nil, errors.Join(err, cleanup())
 				}
-				cleanups = append(cleanups, release)
+			}
+			if err := browser.Err(); err != nil {
+				return nil, errors.Join(err, cleanup())
 			}
 			// Avahi's own cache is not renewable wire evidence. An initial empty
 			// known-answer query obtains a fresh packet even when Avahi is cached.
-			err := topology.senders[socketKey{index, family}].NativeQuestion(ctx, question.DNS, topology.scopes.Sources()[question.Source])
+			err := topology.senders[socketKey{index, family}].NativeQuestion(ctx, question.DNS, topology.scopes.Effective(question.Source))
 			if err != nil {
 				return nil, errors.Join(err, cleanup())
 			}

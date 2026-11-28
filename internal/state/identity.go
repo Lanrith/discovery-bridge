@@ -22,10 +22,9 @@ var prefixPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,7}$`)
 
 // Identities owns SQLite identities and reservations without changing their schema.
 type Identities struct {
-	mu         sync.Mutex
-	db         *sql.DB
-	prefix     string
-	suppressed map[string]bool
+	mu     sync.Mutex
+	db     *sql.DB
+	prefix string
 }
 
 // Open opens an installation-owned database with its configured host alias prefix.
@@ -50,7 +49,7 @@ func Open(ctx context.Context, path, prefix string) (*Identities, error) {
 			return nil, errors.Join(err, db.Close())
 		}
 	}
-	return &Identities{db: db, prefix: prefix, suppressed: make(map[string]bool)}, nil
+	return &Identities{db: db, prefix: prefix}, nil
 }
 
 func nameWire(name string) ([]byte, error) {

@@ -19,7 +19,8 @@ type fixtureOwner struct {
 	mu                sync.Mutex
 	accepted, cleared int
 	failure           error
-	conflicts         []string
+	outcomes          string
+	until             time.Duration
 	failed            chan struct{}
 	changed           chan struct{}
 }
@@ -41,10 +42,10 @@ func (f *fixtureOwner) Clear(context.Context) error {
 	return f.failure
 }
 func (f *fixtureOwner) Failed() <-chan struct{} { return f.failed }
-func (f *fixtureOwner) Conflicts() []string {
+func (f *fixtureOwner) Outcomes() (string, time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]string(nil), f.conflicts...)
+	return f.outcomes, f.until
 }
 func (f *fixtureOwner) Err() error { f.mu.Lock(); defer f.mu.Unlock(); return f.failure }
 
@@ -169,7 +170,7 @@ func TestInvalidReplacementClearsPreviouslyAdmittedProducer(t *testing.T) {
 	}
 }
 
-func TestOwnerFailureWakesIdleProducerAndPreservesConflictResponse(t *testing.T) {
+func TestOwnerFailureWakesIdleProducerWithoutReportingIdentityConflict(t *testing.T) {
 	path, owner := startServer(t, uint32(os.Geteuid()))
 	client, err := Dial(context.Background(), path, "test-boot")
 	if err != nil {
@@ -180,17 +181,15 @@ func TestOwnerFailureWakesIdleProducerAndPreservesConflictResponse(t *testing.T)
 		t.Fatal(err)
 	}
 	owner.mu.Lock()
-	owner.failure = errors.New("conflict")
-	owner.conflicts = []string{"host-alias.local."}
+	owner.failure = errors.New("daemon left")
 	owner.mu.Unlock()
 	close(owner.failed)
-	// Force the next write to fail while leaving the final response readable.
-	// The publisher can close between snapshots, before the producer next sends.
+	// Owner loss can occur between snapshots, before the producer next sends.
 	if err := client.connection.(*net.UnixConn).CloseWrite(); err != nil {
 		t.Fatal(err)
 	}
 	var conflict *Conflict
-	if err := client.Send(context.Background(), nil); !errors.As(err, &conflict) || len(conflict.Names) != 1 || conflict.Names[0] != "host-alias.local." {
-		t.Fatal("owner loss lost conflict reply", err)
+	if err := client.Send(context.Background(), nil); err == nil || errors.As(err, &conflict) {
+		t.Fatal("owner loss did not close cleanly", err)
 	}
 }

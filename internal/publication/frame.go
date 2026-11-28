@@ -144,6 +144,27 @@ func (a Admission) Decode(payload []byte, now time.Duration, previous int64) (in
 	return *value.Sequence, intents, nil
 }
 
+func encodeRecord(answer catalog.Answer) (wireRecord, error) {
+	if answer.RR == nil {
+		return wireRecord{}, errors.New("nil publication answer")
+	}
+	rr := answer.RR
+	name, kind := rr.Header().Name, rr.Header().Rrtype
+	data := strings.TrimPrefix(rr.String(), rr.Header().String())
+	return wireRecord{&name, &kind, &data, &answer.Source, &answer.Unique}, nil
+}
+
+// RecordBytes includes the separator so admission can budget shared dependencies
+// incrementally using the same JSON escaping and fields as the final frame.
+func RecordBytes(answer catalog.Answer) (int, error) {
+	record, err := encodeRecord(answer)
+	if err != nil {
+		return 0, err
+	}
+	data, err := json.Marshal(record)
+	return len(data) + 1, err
+}
+
 // Frame encodes the existing newline-delimited local producer protocol.
 func Frame(boot string, sequence int64, now time.Duration, intents []avahi.Intent) ([]byte, error) {
 	issued := now.Seconds()
@@ -152,13 +173,11 @@ func Frame(boot string, sequence int64, now time.Duration, intents []avahi.Inten
 		deadline, index, family := intent.Deadline.Seconds(), intent.Interface, intent.Family
 		records := make([]wireRecord, 0, len(intent.Records))
 		for _, answer := range intent.Records {
-			if answer.RR == nil {
-				return nil, errors.New("nil publication answer")
+			record, err := encodeRecord(answer)
+			if err != nil {
+				return nil, err
 			}
-			rr := answer.RR
-			name, kind := rr.Header().Name, rr.Header().Rrtype
-			data, source, unique := strings.TrimPrefix(rr.String(), rr.Header().String()), answer.Source, answer.Unique
-			records = append(records, wireRecord{&name, &kind, &data, &source, &unique})
+			records = append(records, record)
 		}
 		groups = append(groups, wireGroup{&index, &family, &deadline, &records})
 	}

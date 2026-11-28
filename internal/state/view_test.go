@@ -63,16 +63,8 @@ func TestOriginalHostCollisionKeepsServiceAliasesStable(t *testing.T) {
 			t.Fatal("unobserved host or alias treated as original", query, err)
 		}
 	}
-	if err := s.ResolveConflicts(ctx, []string{"SENSOR.local.", host, service}); err != nil {
-		t.Fatal(err)
-	}
-	blocked := s.SuppressedHosts()
-	if !blocked["sensor.local."] {
-		t.Fatal(blocked)
-	}
-	delete(blocked, "sensor.local.")
-	if !s.SuppressedHosts()["sensor.local."] {
-		t.Fatal("suppression map was externally mutable")
+	if replacement, err := s.RotateAlias(ctx, "SENSOR.local."); err != nil || replacement != "" {
+		t.Fatal("original host collision changed a persistent alias", replacement, err)
 	}
 	_, after, err := s.Alias(ctx, "lan-a", "Demo._http._tcp.local.", false)
 	if err != nil || after != service {
@@ -116,5 +108,41 @@ func TestCompiledAliasesKeepChainsWithinTheirSourceAndExpiry(t *testing.T) {
 	}
 	if expired, err := s.Compile(ctx, records, now.Add(8*time.Second)); err != nil || len(expired) != 0 {
 		t.Fatal("expired aliases remained visible", expired, err)
+	}
+}
+
+func TestIsolatedAliasRotationPersistsAcrossRestart(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "state.db")
+	s, err := state.Open(ctx, path, "db-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := func(s *state.Identities, name string) string {
+		t.Helper()
+		_, out, err := s.Alias(ctx, "lan-a", name+"._fixture._tcp.local.", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	a, b := alias(s, "one"), alias(s, "two")
+	replacement, err := s.RotateAlias(ctx, a)
+	if err != nil || replacement == "" || replacement == a {
+		t.Fatal(replacement, err)
+	}
+	if next, err := s.RotateAlias(ctx, a); err != nil || next != "" {
+		t.Fatal("second receipt rotated retired identity", next, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = state.Open(ctx, path, "db-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if alias(s, "one") != replacement || alias(s, "two") != b {
+		t.Fatal("restart changed persistent ownership")
 	}
 }

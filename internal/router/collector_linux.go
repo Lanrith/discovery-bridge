@@ -44,13 +44,14 @@ type collectorEpoch struct {
 // collector serializes observation mutation in the epoch's main loop. The gate
 // makes failure withdrawal atomic with the last successful feed publication.
 type collector struct {
-	mu         sync.Mutex
-	current    *collectorEpoch
-	feed       *gateway.Feed
-	identities *state.Identities
-	settings   config.Router
-	translator *translation.Sampler
-	services   *services.Receiver
+	mu          sync.Mutex
+	current     *collectorEpoch
+	feed        *gateway.Feed
+	identities  *state.Identities
+	settings    config.Router
+	translator  *translation.Sampler
+	services    *services.Receiver
+	publication publicationCounts
 }
 
 func (c *collector) demand(ctx context.Context, question responder.Question) error {
@@ -176,23 +177,15 @@ func (c *collector) collect(ctx context.Context, boot string, log *json.Encoder)
 		return err
 	}
 	defer browser.Close()
+	generation := ""
+	for _, link := range t.links {
+		generation = link.Generation
+		break
+	}
 	if c.settings.Native != nil {
 		sources := make(map[string][]netip.Prefix)
-		all := t.scopes.Sources()
-		generation := ""
 		for _, source := range c.settings.Native.Sources {
-			for _, prefix := range all[source] {
-				forbidden := slices.ContainsFunc(c.settings.Forbidden, func(raw string) bool {
-					return prefix.Overlaps(netip.MustParsePrefix(raw))
-				})
-				if !forbidden {
-					sources[source] = append(sources[source], prefix)
-				}
-			}
-		}
-		for _, link := range t.links {
-			generation = link.Generation
-			break
+			sources[source] = t.scopes.Effective(source)
 		}
 		epoch.native, err = native.New(generation, sources, func(ctx context.Context, question native.Question) (func() error, error) {
 			return c.nativeInterest(ctx, browser, t, question)
@@ -202,7 +195,7 @@ func (c *collector) collect(ctx context.Context, boot string, log *json.Encoder)
 		}
 		defer epoch.native.Close()
 	}
-	producer, err := publication.Dial(stop, c.settings.PublisherSocket, boot)
+	producer, err := publication.DialGeneration(stop, c.settings.PublisherSocket, boot, generation)
 	if err != nil {
 		return err
 	}
@@ -296,22 +289,14 @@ func (c *collector) collect(ctx context.Context, boot string, log *json.Encoder)
 	// the event queue merely because the collector has not reached its first tick.
 	seeded := make(chan error, 1)
 	workers.Go(func() {
-		err := browser.Seed(stop)
-		for index, link := range t.links {
-			for _, family := range link.Families {
-				for _, question := range c.settings.Bootstrap {
-					if err == nil {
-						_, err = browser.Watch(stop, avahi.Query{Interface: index, Family: family, Name: question.Name, Type: dns.StringToType[question.Type]})
-					}
-				}
-			}
-		}
-		seeded <- err
+		seeded <- browser.Seed(stop, c.settings.Bootstrap...)
 	})
 	cache := observation.New()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
-	var lastCounts [6]uint64
+	c.publication = publicationCounts{}
+	var lastCounts [8]uint64
+	var lastOutcomes [4]int
 	ready := false
 	for {
 		select {
@@ -367,13 +352,28 @@ func (c *collector) collect(ctx context.Context, boot string, log *json.Encoder)
 			}
 			if err := producer.Send(stop, groups); err != nil {
 				var conflict *publication.Conflict
-				if errors.As(err, &conflict) {
-					bounded, cancel := context.WithTimeout(context.WithoutCancel(stop), 2*time.Second)
-					resolveErr := c.identities.ResolveConflicts(bounded, conflict.Names)
-					cancel()
-					return errors.Join(err, resolveErr)
+				if !errors.As(err, &conflict) {
+					return err
 				}
-				return err
+				remaining := producer.LastReceipt().Until - catalog.Now().Mono
+				bounded, cancel := context.WithTimeout(stop, min(remaining, 2*time.Second))
+				var resolveErr error
+				for _, name := range conflict.Names {
+					// An original is already withheld on its colliding link/family.
+					if _, resolveErr = c.identities.RotateAlias(bounded, name); resolveErr != nil {
+						break
+					}
+				}
+				cancel()
+				if resolveErr != nil {
+					return resolveErr
+				}
+			}
+			if outcomes := producer.LastReceipt().Counts(); outcomes != lastOutcomes {
+				if err := log.Encode(map[string]any{"event": "publication_outcomes", "established": outcomes[0], "pending": outcomes[1], "failed": outcomes[2], "colliding": outcomes[3]}); err != nil {
+					return err
+				}
+				lastOutcomes = outcomes
 			}
 			c.mu.Lock()
 			if c.current == epoch && stop.Err() == nil && c.feed != nil {
@@ -391,13 +391,13 @@ func (c *collector) collect(ctx context.Context, boot string, log *json.Encoder)
 			}
 			wire, hints := cache.Counts()
 			watches, _, deferred := browser.Counts()
-			published := 0
+			submitted := 0
 			for _, group := range groups {
-				published += len(group.Records)
+				submitted += len(group.Records)
 			}
-			counts := [6]uint64{uint64(wire), uint64(hints), uint64(len(records)), uint64(published), uint64(watches), deferred}
+			counts := [8]uint64{uint64(wire), uint64(hints), uint64(len(records)), uint64(submitted), uint64(watches), deferred, uint64(c.publication.deferredGraphs), uint64(c.publication.deferredRecords)}
 			if counts != lastCounts {
-				if err := log.Encode(map[string]any{"event": "catalog_counts", "wire": wire, "hints": hints, "correlated": len(records), "published": published, "browsers": watches, "deferred": deferred}); err != nil {
+				if err := log.Encode(map[string]any{"event": "catalog_counts", "wire": wire, "hints": hints, "correlated": len(records), "submitted": submitted, "browsers": watches, "deferred": deferred, "deferred_publication_graphs": c.publication.deferredGraphs, "deferred_publication_records": c.publication.deferredRecords}); err != nil {
 					return err
 				}
 				lastCounts = counts

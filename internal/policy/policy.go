@@ -13,6 +13,7 @@ import (
 type SourcePolicy struct {
 	sources   map[string][]netip.Prefix
 	forbidden []netip.Prefix
+	effective map[string][]netip.Prefix
 }
 
 // New validates explicit operator scopes without adding installation defaults.
@@ -47,7 +48,63 @@ func New(sources map[string][]string, forbidden []string) (*SourcePolicy, error)
 		}
 		policy.forbidden = append(policy.forbidden, prefix)
 	}
+	policy.effective = make(map[string][]netip.Prefix, len(sources))
+	for name, allowed := range policy.sources {
+		// Walk only the prefix tree branches touched by an exclusion. Sorting
+		// enclosing declarations first also removes duplicate and contained scopes.
+		sorted := slices.Clone(allowed)
+		slices.SortFunc(sorted, func(a, b netip.Prefix) int { return a.Bits() - b.Bits() })
+		var roots, effective []netip.Prefix
+		for _, prefix := range sorted {
+			if slices.ContainsFunc(roots, func(r netip.Prefix) bool { return r.Contains(prefix.Addr()) }) {
+				continue
+			}
+			roots = append(roots, prefix)
+			if !survivors(prefix, policy.forbidden, &effective) {
+				return nil, fmt.Errorf("source %q exceeds 128 effective prefixes", name)
+			}
+		}
+		policy.effective[name] = effective
+	}
 	return policy, nil
+}
+
+// survivors appends the minimal surviving CIDRs within a declared network.
+func survivors(prefix netip.Prefix, excluded []netip.Prefix, out *[]netip.Prefix) bool {
+	split := false
+	for _, cut := range excluded {
+		if !prefix.Overlaps(cut) {
+			continue
+		}
+		if cut.Bits() <= prefix.Bits() {
+			return true
+		}
+		split = true
+	}
+	if !split {
+		*out = append(*out, prefix)
+		return len(*out) <= 128
+	}
+	bits := prefix.Bits() + 1
+	left := netip.PrefixFrom(prefix.Addr(), bits)
+	raw := prefix.Addr().As16()
+	bit := bits - 1
+	if prefix.Addr().Is4() {
+		bit += 96
+	}
+	raw[bit/8] |= 1 << (7 - bit%8)
+	right := netip.PrefixFrom(netip.AddrFrom16(raw).Unmap(), bits)
+	return survivors(left, excluded, out) && survivors(right, excluded, out)
+}
+
+// Effective returns the surviving CIDRs for a link's native reverse interests.
+func (p *SourcePolicy) Effective(source string) []netip.Prefix {
+	return slices.Clone(p.effective[source])
+}
+
+// Excludes also applies to link-local senders that need no global address scope.
+func (p *SourcePolicy) Excludes(address netip.Addr) bool {
+	return slices.ContainsFunc(p.forbidden, func(prefix netip.Prefix) bool { return prefix.Contains(address) })
 }
 
 // CheckAddress rejects addresses outside their observed source and unsafe scopes.

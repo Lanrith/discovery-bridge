@@ -43,7 +43,7 @@ func decodePacket(packet Packet, links map[int]Link, scopes *policy.SourcePolicy
 	if !src.IsValid() || !dst.IsValid() || src.Zone() != "" || dst.Zone() != "" || src.Is4In6() || dst.Is4In6() || src.Is4() != (packet.Family == 4) || dst.Is4() != (packet.Family == 4) {
 		return nil, errors.New("LAN address family mismatch")
 	}
-	if src.IsUnspecified() || src.IsMulticast() || src.IsLoopback() {
+	if src.IsUnspecified() || src.IsMulticast() || src.IsLoopback() || scopes.Excludes(src) {
 		return nil, errors.New("invalid LAN sender")
 	}
 	for _, addresses := range local {
@@ -146,7 +146,7 @@ func ParseNative(packet Packet, links map[int]Link, scopes *policy.SourcePolicy,
 		return nil, err
 	}
 	link := links[packet.Interface]
-	prefixes := scopes.Sources()[link.Source]
+	prefixes := scopes.Effective(link.Source)
 	result := make([]Record, 0, len(message.Answer)+len(message.Ns)+len(message.Extra))
 	for _, records := range [][]dns.RR{message.Answer, message.Ns, message.Extra} {
 		for _, rr := range records {

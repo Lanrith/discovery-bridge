@@ -45,10 +45,28 @@ func (l Listener) Prefixes() ([]netip.Prefix, error) {
 	return result, nil
 }
 
-// Bootstrap supplies generic browse demand in addition to standard enumeration.
+// Bootstrap selects a permanent, source-scoped browse interest.
 type Bootstrap struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
+}
+
+// MaxPermanentBrowsers reserves half of Avahi's 1,024 per-client objects for
+// dependencies, short-lived native DNS lookups and ordinary client demand.
+const MaxPermanentBrowsers = 512
+
+// BootstrapInterests returns each configured question and the standard enumeration once.
+func BootstrapInterests(configured []Bootstrap) []Bootstrap {
+	result := []Bootstrap{{Name: catalog.Enumeration, Type: "PTR"}}
+	seen := map[Bootstrap]bool{result[0]: true}
+	for _, interest := range configured {
+		interest.Name = catalog.NameKey(interest.Name)
+		if !seen[interest] {
+			result = append(result, interest)
+			seen[interest] = true
+		}
+	}
+	return result
 }
 
 // NativeListener admits one independent DNS frontend account to selected links.
@@ -148,6 +166,9 @@ func (r Router) Validate() error {
 		if !catalog.LocalName(question.Name) || question.Type != "A" && question.Type != "AAAA" && question.Type != "PTR" && question.Type != "SRV" && question.Type != "TXT" {
 			return errors.New("bootstrap requires supported .local questions")
 		}
+	}
+	if groups*len(BootstrapInterests(r.Bootstrap)) > MaxPermanentBrowsers {
+		return errors.New("configured browse watches exceed the 512 permanent browser budget")
 	}
 	if r.Gateway != nil {
 		if _, err := r.Gateway.Prefixes(); err != nil {

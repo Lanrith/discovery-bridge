@@ -2,6 +2,8 @@ package policy_test
 
 import (
 	"net/netip"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,5 +108,36 @@ func TestNAT64UsesConfiguredPrefix(t *testing.T) {
 	}
 	if _, err := policy.NAT64(netip.MustParsePrefix("2001:db8::/64"), netip.MustParseAddr("192.0.2.80")); err == nil {
 		t.Fatal("unsupported prefix accepted")
+	}
+}
+
+func TestPartialSourceAdmissionKeepsOriginalSubnetBoundaries(t *testing.T) {
+	scopes, err := policy.New(map[string][]string{
+		"home":  {"192.0.2.0/24", "2001:db8:88::/124"},
+		"other": {"198.51.100.0/24"},
+	}, []string{"192.0.2.128/25", "2001:db8:88::8/125", "fe80::ff/128"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		source, ip string
+		allowed    bool
+	}{
+		{"home", "192.0.2.127", true}, {"home", "192.0.2.128", false},
+		{"home", "2001:db8:88::7", true}, {"home", "2001:db8:88::8", false},
+		{"other", "2001:db8:88::7", false}, {"other", "192.0.2.127", false},
+	} {
+		addr := netip.MustParseAddr(test.ip)
+		inNativeScope := slices.ContainsFunc(scopes.Effective(test.source), func(prefix netip.Prefix) bool { return prefix.Contains(addr) })
+		if inNativeScope != test.allowed || (scopes.CheckAddress(test.source, addr) == nil) != test.allowed {
+			t.Fatal(test)
+		}
+	}
+	if !scopes.Excludes(netip.MustParseAddr("fe80::ff")) {
+		t.Fatal("excluded link-local sender allowed")
+	}
+	_, err = policy.New(map[string][]string{"home": {"2001:db8::/48"}}, []string{"2001:db8:0:4000::1/128", "2001:db8:0:8000::1/128"})
+	if err == nil || !strings.Contains(err.Error(), "128 effective") {
+		t.Fatal("oversized source policy", err)
 	}
 }
